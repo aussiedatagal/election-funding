@@ -1,376 +1,443 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import {
-  forceSimulation, forceLink, forceManyBody,
-  forceCenter, forceCollide, forceX, forceY,
-} from 'd3-force';
-import { partyColor, categoryColor } from '../lib/partyConfig';
-import { formatFull, truncate } from '../lib/formatters';
+import { useRef, useEffect, useMemo, useCallback, useLayoutEffect, useState } from 'react';
+import cytoscape from 'cytoscape';
+import fcose from 'cytoscape-fcose';
+import { partyColor, categoryColor, CATEGORY_COLORS } from '../lib/partyConfig';
+import { formatFull, truncate, formatPct } from '../lib/formatters';
 import { getDonorInfo, getPartyInfo } from '../lib/entityInfo';
 
-const VB_W = 1100;
-const VB_H = 700;
-const BASE_R = 5;
-const MAX_R = 38;
+cytoscape.use(fcose);
+
+const BASE_SIZE = 8;
+const MAX_SIZE = 34;
 
 function nodeColor(node) {
   if (node.type === 'party') return partyColor(node.name);
   return categoryColor(node.category);
 }
 
-function calcR(nodeId, flowMap, maxFlow) {
-  const flow = flowMap.get(nodeId) || 0;
-  return BASE_R + (MAX_R - BASE_R) * Math.sqrt(flow / maxFlow);
+function splitLabelLines(name, maxPerLine) {
+  const t = name.trim();
+  if (!t.length) return [''];
+  if (t.length <= maxPerLine) return [t];
+  const slice = t.slice(0, maxPerLine + 1);
+  const sp = slice.lastIndexOf(' ');
+  const cut = sp > Math.floor(maxPerLine * 0.4) ? sp : maxPerLine;
+  const line1 = t.slice(0, cut).trimEnd();
+  const rest = t.slice(cut).trim();
+  if (!rest.length) return [line1];
+  if (rest.length <= maxPerLine) return [line1, rest];
+  return [line1, truncate(rest, maxPerLine)];
 }
 
-// Convert screen coords → SVG viewBox coords
-function toVB(clientX, clientY, rect) {
-  return {
-    x: (clientX - rect.left) / rect.width * VB_W,
-    y: (clientY - rect.top) / rect.height * VB_H,
+function buildNodeTooltipBody(node, flowMap, linksArr, nodeById) {
+  const isParty = node.type === 'party';
+  const isGroup = node.type === 'donor_group';
+  const total = flowMap.get(node.id) || 0;
+  const info = isParty ? getPartyInfo(node.name) : getDonorInfo(node.name);
+  const nameFor = id => {
+    const sid = id?.id ?? id;
+    return nodeById.get(sid)?.name;
   };
-}
 
-export default function NetworkGraph({ data, showGroups, onTooltip }) {
-  const svgRef = useRef(null);
-  const simRef = useRef(null);
-  const nodesRef = useRef([]);
-  const linksRef = useRef([]);
-  const dragNodeRef = useRef(null);   // node being dragged
-  const panRef = useRef(null);        // { startVBX, startVBY, startTX, startTY }
-  const vpRef = useRef({ x: 0, y: 0, k: 1 });   // live transform (no re-render lag)
-  const [vp, setVp] = useState({ x: 0, y: 0, k: 1 }); // drives render
-  const [, tick] = useState(0);
-  const [hoveredId, setHoveredId] = useState(null);
-
-  // Keep live ref in sync
-  vpRef.current = vp;
-
-  // ── Build graph data ──────────────────────────────────────────────────────
-  const { graphNodes, graphLinks, flowMap, maxFlow, maxLinkVal } = useMemo(() => {
-    if (!data?.nodes?.length) {
-      return { graphNodes: [], graphLinks: [], flowMap: new Map(), maxFlow: 1, maxLinkVal: 1 };
-    }
-    const vis = showGroups ? data.nodes : data.nodes.filter(n => n.type !== 'donor_group');
-    const visIds = new Set(vis.map(n => n.id));
-    const visLinks = data.links.filter(l => visIds.has(l.source) && visIds.has(l.target));
-
-    const flowMap = new Map();
-    visLinks.forEach(l => {
-      flowMap.set(l.source, (flowMap.get(l.source) || 0) + l.value);
-      flowMap.set(l.target, (flowMap.get(l.target) || 0) + l.value);
-    });
-    const maxFlow = Math.max(...flowMap.values(), 1);
-    const maxLinkVal = Math.max(...visLinks.map(l => l.value), 1);
-    return { graphNodes: vis, graphLinks: visLinks, flowMap, maxFlow, maxLinkVal };
-  }, [data, showGroups]);
-
-  // ── Force simulation ──────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!graphNodes.length) return;
-
-    // Seed x from sortKey (political lean) so clustering starts meaningful
-    const simNodes = graphNodes.map(n => ({
-      ...n,
-      x: (n.sortKey / 24) * VB_W * 0.7 + VB_W * 0.15 + (Math.random() - 0.5) * 80,
-      y: VB_H / 2 + (Math.random() - 0.5) * VB_H * 0.65,
-    }));
-    const simLinks = graphLinks.map(l => ({ ...l }));
-
-    nodesRef.current = simNodes;
-    linksRef.current = simLinks;
-
-    const logMax = Math.log1p(maxLinkVal);
-
-    const sim = forceSimulation(simNodes)
-      .force('link', forceLink(simLinks)
-        .id(d => d.id)
-        .distance(d => {
-          const norm = Math.log1p(d.value) / logMax;
-          return 160 - 120 * norm;   // 40–160 px
-        })
-        .strength(d => {
-          const norm = Math.log1p(d.value) / logMax;
-          return 0.12 + 0.5 * norm;
-        })
-      )
-      .force('charge', forceManyBody()
-        .strength(d => -(55 + calcR(d.id, flowMap, maxFlow) * 7))
-      )
-      .force('center', forceCenter(VB_W / 2, VB_H / 2).strength(0.03))
-      .force('x', forceX(VB_W / 2).strength(0.01))
-      .force('y', forceY(VB_H / 2).strength(0.01))
-      .force('collide', forceCollide()
-        .radius(d => {
-          const r = calcR(d.id, flowMap, maxFlow);
-          // Party nodes are squares (~1.45× r), so give them more collision radius
-          return (d.type === 'party' ? r * 1.55 : r) + 4;
-        })
-        .strength(0.65)
-      )
-      .alphaDecay(0.013)
-      .on('tick', () => tick(n => n + 1));
-
-    simRef.current = sim;
-    return () => sim.stop();
-  }, [graphNodes, graphLinks, flowMap, maxFlow, maxLinkVal]);
-
-  // ── Non-passive wheel listener for zoom ───────────────────────────────────
-  useEffect(() => {
-    const el = svgRef.current;
-    if (!el) return;
-    const onWheel = (e) => {
-      e.preventDefault();
-      const rect = el.getBoundingClientRect();
-      const { x: mx, y: my } = toVB(e.clientX, e.clientY, rect);
-      const factor = e.deltaY < 0 ? 1.13 : 1 / 1.13;
-      setVp(t => {
-        const k = Math.max(0.15, Math.min(8, t.k * factor));
-        const s = k / t.k;
-        return { k, x: mx - s * (mx - t.x), y: my - s * (my - t.y) };
-      });
-    };
-    el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
-  }, []);
-
-  // ── Hover highlight ───────────────────────────────────────────────────────
-  const { activeNodeIds, activeLinkSet } = useMemo(() => {
-    if (hoveredId === null) return { activeNodeIds: null, activeLinkSet: null };
-    const nodeIds = new Set([hoveredId]);
-    const linkSet = new Set();
-    linksRef.current.forEach((l, i) => {
+  const breakdown = linksArr
+    .filter(l => {
       const s = l.source?.id ?? l.source;
       const t = l.target?.id ?? l.target;
-      if (s === hoveredId || t === hoveredId) {
-        linkSet.add(i);
-        nodeIds.add(s);
-        nodeIds.add(t);
+      return isParty ? t === node.id : s === node.id;
+    })
+    .map(l => ({
+      name: isParty ? (nameFor(l.source) ?? '?') : (nameFor(l.target) ?? '?'),
+      value: l.value,
+      pct: total > 0 ? (100 * l.value) / total : 0,
+    }))
+    .sort((a, b) => b.value - a.value);
+
+  const shownBreakdown = breakdown.slice(0, 10);
+  const rest = breakdown.length - shownBreakdown.length;
+
+  return (
+    <div className="tt-body">
+      <div className="tt-name">{node.name}</div>
+      <div className="tt-meta">
+        {isParty ? '■ Party / Group' : isGroup
+          ? `● Grouped donors — ${node.category}`
+          : `● Donor — ${node.category}`}
+      </div>
+      <div className="tt-amount">
+        {isParty ? 'Total received: ' : 'Total donated: '}
+        <strong>{formatFull(total)}</strong>
+      </div>
+      {shownBreakdown.length > 0 && (
+        <div className="tt-members">
+          <div className="tt-members-heading">
+            {isParty ? 'From donors' : 'Donations to parties'}
+          </div>
+          {shownBreakdown.map(item => (
+            <div key={item.name} className="tt-member-row">
+              <span className="tt-member-name">{truncate(item.name, 28)}</span>
+              <span className="tt-member-pct">{formatPct(item.pct)}</span>
+              <span className="tt-member-amt">{formatFull(item.value)}</span>
+            </div>
+          ))}
+          {rest > 0 && <div className="tt-members-more">…and {rest} more</div>}
+        </div>
+      )}
+      {info && <div className="tt-info">{info}</div>}
+    </div>
+  );
+}
+
+// Cytoscape stylesheet — defined once outside the component so it's never recreated.
+const CY_STYLE = [
+  {
+    selector: 'node',
+    style: {
+      'background-color': 'data(color)',
+      'font-family': "system-ui, -apple-system, 'Segoe UI', sans-serif",
+    },
+  },
+  {
+    selector: 'node[type = "party"]',
+    style: {
+      'shape': 'roundrectangle',
+      'label': 'data(label)',
+      'text-valign': 'center',
+      'text-halign': 'center',
+      'color': '#f8fafc',
+      'text-outline-color': 'data(color)',
+      'text-outline-width': 1,
+      'font-size': 11,
+      'font-weight': 600,
+      'text-wrap': 'wrap',
+      'text-max-width': 110,
+      'width': 'label',
+      'height': 'label',
+      'padding': 8,
+      'border-width': 2,
+      'border-color': 'rgba(255,255,255,0.55)',
+      'cursor': 'pointer',
+    },
+  },
+  {
+    selector: 'node[type = "donor"]',
+    style: {
+      'shape': 'ellipse',
+      'label': '',
+      'width': 'data(size)',
+      'height': 'data(size)',
+      'border-width': 1,
+      'border-color': 'rgba(15,23,42,0.3)',
+      'cursor': 'pointer',
+    },
+  },
+  {
+    selector: 'edge',
+    style: {
+      'line-color': 'data(color)',
+      'width': 'data(width)',
+      'opacity': 0.35,
+      'curve-style': 'bezier',
+    },
+  },
+  // Invisible similarity edges — participate in layout but never rendered
+  {
+    selector: 'edge[?isSim]',
+    style: { 'opacity': 0, 'width': 0, 'events': 'no' },
+  },
+  // Everything fades when a node is selected
+  { selector: '.faded', style: { 'opacity': 0.07 } },
+  // Selected node and its neighbours/edges come forward
+  {
+    selector: 'node.highlighted',
+    style: { 'opacity': 1, 'border-color': '#ffffff', 'border-width': 3 },
+  },
+  {
+    // Reveal donor label when it is part of a selection
+    selector: 'node[type = "donor"].highlighted',
+    style: {
+      'label': 'data(label)',
+      'text-valign': 'bottom',
+      'text-margin-y': 3,
+      'font-size': 9,
+      'color': '#1a1d27',
+      'text-outline-color': '#ffffff',
+      'text-outline-width': 2,
+    },
+  },
+  { selector: 'edge.highlighted', style: { 'opacity': 0.9, 'width': 'data(highlightWidth)' } },
+];
+
+export default function NetworkGraph({ data, onTooltip, tooltipPinned }) {
+  const containerRef = useRef(null);
+  const cyRef = useRef(null);
+  const onTooltipRef = useRef(onTooltip);
+  const tooltipPinnedRef = useRef(tooltipPinned);
+  // Holds the latest raw graph data so event handlers don't go stale between rebuilds
+  const dataRef = useRef({ graphLinks: [], flowMap: new Map(), nodeById: new Map() });
+
+  const [layoutNarrow, setLayoutNarrow] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth <= 640
+  );
+
+  useEffect(() => { onTooltipRef.current = onTooltip; }, [onTooltip]);
+  useEffect(() => { tooltipPinnedRef.current = tooltipPinned; }, [tooltipPinned]);
+
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const read = () => {
+      const w = el.getBoundingClientRect().width;
+      setLayoutNarrow(w > 0 && w < 560);
+    };
+    read();
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const { cyElements, graphLinks, flowMap, nodeById, hasNodes } = useMemo(() => {
+    const empty = {
+      cyElements: [], graphLinks: [], flowMap: new Map(), nodeById: new Map(), hasNodes: false,
+    };
+    if (!data?.nodes?.length) return empty;
+
+    // Exclude grouped buckets and the catch-all "Other / Minor Parties" node —
+    // it has no meaningful shared-donor connections and adds noise.
+    const EXCLUDE = new Set(['Other / Minor Parties']);
+    const vis = data.nodes.filter(n => n.type !== 'donor_group' && !EXCLUDE.has(n.name));
+    const visIds = new Set(vis.map(n => n.id));
+    const nodeMap = new Map(vis.map(n => [n.id, n]));
+    const visLinks = data.links.filter(l => visIds.has(l.source) && visIds.has(l.target));
+
+    const fm = new Map();
+    visLinks.forEach(l => {
+      fm.set(l.source, (fm.get(l.source) || 0) + l.value);
+      fm.set(l.target, (fm.get(l.target) || 0) + l.value);
+    });
+    const maxFlow = Math.max(...fm.values(), 1);
+    const maxLinkVal = Math.max(...visLinks.map(l => l.value), 1);
+    const logMax = Math.log1p(maxLinkVal);
+
+    // ── Pairwise party similarity from shared donors ──────────────────────────
+    // Used to create invisible layout-only edges that pull similar parties together.
+    const donorToParties = new Map();
+    visLinks.forEach(l => {
+      if (nodeMap.get(l.target)?.type !== 'party') return;
+      if (!donorToParties.has(l.source)) donorToParties.set(l.source, []);
+      donorToParties.get(l.source).push({ partyId: l.target, value: l.value });
+    });
+
+    const pairSim = new Map();
+    donorToParties.forEach(entries => {
+      if (entries.length < 2) return;
+      for (let i = 0; i < entries.length; i++) {
+        for (let j = i + 1; j < entries.length; j++) {
+          const a = entries[i].partyId, b = entries[j].partyId;
+          const key = `${Math.min(a, b)}-${Math.max(a, b)}`;
+          pairSim.set(key, (pairSim.get(key) || 0) + Math.sqrt(entries[i].value * entries[j].value));
+        }
       }
     });
-    return { activeNodeIds: nodeIds, activeLinkSet: linkSet };
-  }, [hoveredId]);
+    const maxSim = Math.max(...pairSim.values(), 1);
 
-  // ── Node hover ────────────────────────────────────────────────────────────
-  const handleNodeEnter = useCallback((e, node) => {
-    setHoveredId(node.id);
-    const isParty = node.type === 'party';
-    const isGroup = node.type === 'donor_group';
-    const total = flowMap.get(node.id) || 0;
-    const info = isParty ? getPartyInfo(node.name) : getDonorInfo(node.name);
-
-    // Build breakdown: for donors → parties they give to; for parties → donors they receive from
-    const breakdown = linksRef.current
-      .filter(l => {
-        const s = l.source?.id ?? l.source;
-        const t = l.target?.id ?? l.target;
-        return isParty ? t === node.id : s === node.id;
-      })
-      .map(l => ({
-        name: isParty ? (l.source?.name ?? '?') : (l.target?.name ?? '?'),
-        value: l.value,
-      }))
-      .sort((a, b) => b.value - a.value);
-
-    const shownBreakdown = breakdown.slice(0, 8);
-    const rest = breakdown.length - shownBreakdown.length;
-
-    onTooltip({
-      x: e.clientX, y: e.clientY,
-      content: (
-        <div className="tt-body">
-          <div className="tt-name">{node.name}</div>
-          <div className="tt-meta">
-            {isParty ? '■ Party / Group' : isGroup
-              ? `● Grouped donors — ${node.category}`
-              : `● Donor — ${node.category}`}
-          </div>
-          <div className="tt-amount">
-            {isParty ? 'Total received: ' : 'Total donated: '}
-            <strong>{formatFull(total)}</strong>
-          </div>
-          {shownBreakdown.length > 0 && (
-            <div className="tt-members">
-              <div className="tt-members-heading">
-                {isParty ? 'From donors:' : 'Donations to:'}
-              </div>
-              {shownBreakdown.map(item => (
-                <div key={item.name} className="tt-member-row">
-                  <span className="tt-member-name">{truncate(item.name, 30)}</span>
-                  <span className="tt-member-amt">{formatFull(item.value)}</span>
-                </div>
-              ))}
-              {rest > 0 && <div className="tt-members-more">…and {rest} more</div>}
-            </div>
-          )}
-          {info && <div className="tt-info">{info}</div>}
-        </div>
-      ),
+    // ── Build cytoscape elements ──────────────────────────────────────────────
+    const cyNodes = vis.map(n => {
+      const isParty = n.type === 'party';
+      const flow = fm.get(n.id) || 0;
+      const rawSize = BASE_SIZE + (MAX_SIZE - BASE_SIZE) * Math.sqrt(flow / maxFlow);
+      const size = Math.max(BASE_SIZE, Math.min(MAX_SIZE, rawSize));
+      const label = isParty ? splitLabelLines(n.name, 18).join('\n') : n.name;
+      return {
+        group: 'nodes',
+        data: { id: String(n.id), label, type: n.type, color: nodeColor(n), size },
+      };
     });
-  }, [flowMap, onTooltip]);
 
-  const handleNodeLeave = useCallback(() => {
-    setHoveredId(null);
-    onTooltip(null);
-  }, [onTooltip]);
+    const cyEdges = visLinks.map((l, i) => {
+      const partyNode = nodeMap.get(l.target)?.type === 'party'
+        ? nodeMap.get(l.target) : nodeMap.get(l.source);
+      const norm = Math.log1p(l.value) / logMax;
+      const width = Math.max(1, 1.2 + 5 * norm);
+      return {
+        group: 'edges',
+        data: {
+          id: `e-${i}`,
+          source: String(l.source),
+          target: String(l.target),
+          value: l.value,
+          color: partyColor(partyNode?.name ?? ''),
+          width,
+          highlightWidth: Math.max(2, width * 1.6),
+          isSim: false,
+        },
+      };
+    });
 
-  // ── Drag / pan handlers ───────────────────────────────────────────────────
-  const handleNodeMouseDown = useCallback((e, node) => {
-    e.stopPropagation();
-    dragNodeRef.current = node;
-    node.fx = node.x;
-    node.fy = node.y;
-    simRef.current?.alphaTarget(0.2).restart();
-  }, []);
+    // Invisible similarity edges: shorter ideal length = pulled closer together
+    let simIdx = 0;
+    pairSim.forEach((overlap, key) => {
+      const norm = overlap / maxSim;
+      if (norm > 0.02) {
+        const [p1, p2] = key.split('-');
+        cyEdges.push({
+          group: 'edges',
+          data: {
+            id: `sim-${simIdx++}`,
+            source: p1, target: p2,
+            isSim: true,
+            idealLen: Math.round(40 + 140 * (1 - norm)),
+            color: 'transparent', width: 0, highlightWidth: 0,
+          },
+        });
+      }
+    });
 
-  const handleBgMouseDown = useCallback((e) => {
-    if (dragNodeRef.current || !svgRef.current) return;
-    const rect = svgRef.current.getBoundingClientRect();
-    const vb = toVB(e.clientX, e.clientY, rect);
-    const t = vpRef.current;
-    panRef.current = { startX: vb.x, startY: vb.y, origTX: t.x, origTY: t.y };
-  }, []);
+    return {
+      cyElements: [...cyNodes, ...cyEdges],
+      graphLinks: visLinks,
+      flowMap: fm,
+      nodeById: nodeMap,
+      hasNodes: cyNodes.length > 0,
+    };
+  }, [data]);
 
-  const handleSvgMouseMove = useCallback((e) => {
-    if (!svgRef.current) return;
-    const rect = svgRef.current.getBoundingClientRect();
-    const vb = toVB(e.clientX, e.clientY, rect);
+  useEffect(() => {
+    dataRef.current = { graphLinks, flowMap, nodeById };
+  }, [graphLinks, flowMap, nodeById]);
 
-    if (dragNodeRef.current) {
-      const { x: tx, y: ty, k } = vpRef.current;
-      dragNodeRef.current.fx = (vb.x - tx) / k;
-      dragNodeRef.current.fy = (vb.y - ty) / k;
-      simRef.current?.alpha(0.1).restart();
-      tick(n => n + 1);
-    } else if (panRef.current) {
-      const dx = vb.x - panRef.current.startX;
-      const dy = vb.y - panRef.current.startY;
-      setVp(t => ({ ...t, x: panRef.current.origTX + dx, y: panRef.current.origTY + dy }));
-    }
-  }, []);
+  const resetView = useCallback(() => {
+    cyRef.current?.fit(undefined, layoutNarrow ? 16 : 36);
+  }, [layoutNarrow]);
 
-  const handleSvgMouseUp = useCallback(() => {
-    if (dragNodeRef.current) {
-      dragNodeRef.current.fx = null;
-      dragNodeRef.current.fy = null;
-      simRef.current?.alphaTarget(0);
-      dragNodeRef.current = null;
-    }
-    panRef.current = null;
-  }, []);
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !hasNodes) return;
 
-  if (!graphNodes.length) {
+    const cy = cytoscape({
+      container,
+      elements: cyElements,
+      style: CY_STYLE,
+      userZoomingEnabled: true,
+      userPanningEnabled: true,
+      boxSelectionEnabled: false,
+      minZoom: 0.1,
+      maxZoom: 4,
+    });
+    cyRef.current = cy;
+
+    cy.layout({
+      name: 'fcose',
+      quality: 'default',
+      randomize: true,
+      animate: false,
+      fit: true,
+      padding: layoutNarrow ? 16 : 40,
+      nodeDimensionsIncludeLabels: true,
+      uniformNodeDimensions: false,
+      packComponents: true,
+      tile: true,
+      tilingPaddingVertical: 50,
+      tilingPaddingHorizontal: 50,
+      idealEdgeLength: edge => edge.data('isSim') ? (edge.data('idealLen') || 120) : 60,
+      edgeElasticity: edge => edge.data('isSim') ? 0.7 : 0.45,
+      nodeRepulsion: node => node.data('type') === 'party' ? 18000 : 4500,
+      gravity: 0.25,
+      gravityRangeThreshold: 1.5,
+      gravityCompound: 1.0,
+      gravityRangeThresholdCompound: 1.5,
+      numIter: 3000,
+    }).run();
+
+    // ── Selection / highlight ─────────────────────────────────────────────────
+    const clearHighlight = () => cy.elements().removeClass('highlighted faded');
+
+    const applyHighlight = cyNode => {
+      const edges = cyNode.connectedEdges().filter(e => !e.data('isSim'));
+      const neighbours = edges.connectedNodes();
+      cy.elements().addClass('faded');
+      cyNode.removeClass('faded').addClass('highlighted');
+      edges.removeClass('faded').addClass('highlighted');
+      neighbours.removeClass('faded');
+    };
+
+    // Click node → pin highlight + tooltip
+    cy.on('tap', 'node', evt => {
+      const cyNode = evt.target;
+      const rawNode = dataRef.current.nodeById.get(parseInt(cyNode.id(), 10));
+      if (!rawNode) return;
+      applyHighlight(cyNode);
+      const { graphLinks: gl, flowMap: fm2, nodeById: nb } = dataRef.current;
+      onTooltipRef.current({
+        x: evt.originalEvent?.clientX ?? 0,
+        y: evt.originalEvent?.clientY ?? 0,
+        pinned: true,
+        content: buildNodeTooltipBody(rawNode, fm2, gl, nb),
+      });
+    });
+
+    // Hover node → transient tooltip (skip if something is pinned)
+    cy.on('mouseover', 'node', evt => {
+      if (tooltipPinnedRef.current) return;
+      const cyNode = evt.target;
+      const rawNode = dataRef.current.nodeById.get(parseInt(cyNode.id(), 10));
+      if (!rawNode) return;
+      applyHighlight(cyNode);
+      const { graphLinks: gl, flowMap: fm2, nodeById: nb } = dataRef.current;
+      onTooltipRef.current({
+        x: evt.originalEvent?.clientX ?? 0,
+        y: evt.originalEvent?.clientY ?? 0,
+        pinned: false,
+        content: buildNodeTooltipBody(rawNode, fm2, gl, nb),
+      });
+    });
+
+    cy.on('mouseout', 'node', () => {
+      if (tooltipPinnedRef.current) return;
+      clearHighlight();
+      onTooltipRef.current(null);
+    });
+
+    // Click background → clear everything
+    cy.on('tap', evt => {
+      if (evt.target !== cy) return;
+      clearHighlight();
+      onTooltipRef.current(null);
+    });
+
+    return () => {
+      cy.destroy();
+      if (cyRef.current === cy) cyRef.current = null;
+    };
+  }, [cyElements, layoutNarrow, hasNodes]);
+
+  if (!hasNodes) {
     return <div className="chart-empty">No data for this selection.</div>;
   }
 
-  const nodes = nodesRef.current;
-  const links = linksRef.current;
-  const { x: tx, y: ty, k } = vp;
-
   return (
     <div className="network-outer">
-      <div className="network-controls">
-        <span className="network-hint">
-          ■ parties · ● donors — scroll to zoom · drag background to pan · drag nodes to reposition
-        </span>
-        <button
-          className="net-reset-btn"
-          onClick={() => setVp({ x: 0, y: 0, k: 1 })}
-        >
-          Reset view
-        </button>
-      </div>
       <div className="network-container">
-        <svg
-          ref={svgRef}
-          width="100%"
-          height="100%"
-          viewBox={`0 0 ${VB_W} ${VB_H}`}
-          preserveAspectRatio="xMidYMid meet"
-          className="network-svg"
-          onMouseDown={handleBgMouseDown}
-          onMouseMove={handleSvgMouseMove}
-          onMouseUp={handleSvgMouseUp}
-          onMouseLeave={handleSvgMouseUp}
-        >
-          <g transform={`translate(${tx},${ty}) scale(${k})`}>
-
-            {/* Links */}
-            {links.map((link, i) => {
-              const src = link.source;
-              const tgt = link.target;
-              if (!src?.x || !tgt?.x) return null;
-              const isActive = activeLinkSet === null || activeLinkSet.has(i);
-              const alpha = activeLinkSet === null ? 0.25 : isActive ? 0.72 : 0.04;
-              const partyNode = tgt.type === 'party' ? tgt : src;
-              const w = 0.5 + 5 * (Math.log1p(link.value) / Math.log1p(maxLinkVal));
-              return (
-                <line
-                  key={i}
-                  x1={src.x} y1={src.y}
-                  x2={tgt.x} y2={tgt.y}
-                  stroke={partyColor(partyNode.name)}
-                  strokeOpacity={alpha}
-                  strokeWidth={w}
-                />
-              );
-            })}
-
-            {/* Nodes — circles for donors, rounded squares for parties */}
-            {nodes.map(node => {
-              if (node.x == null) return null;
-              const r = calcR(node.id, flowMap, maxFlow);
-              const color = nodeColor(node);
-              const isActive = activeNodeIds === null || activeNodeIds.has(node.id);
-              const isHov = hoveredId === node.id;
-              const isParty = node.type === 'party';
-              const showLabel = isParty || r > 13;
-              const maxChars = r > 24 ? 18 : r > 14 ? 12 : 7;
-              // Parties: rounded square; donors: circle
-              const s = r * 1.45;  // square half-side so area ≈ circle area
-
-              return (
-                <g
-                  key={node.id}
-                  transform={`translate(${node.x},${node.y})`}
-                  style={{ opacity: isActive ? 1 : 0.1, transition: 'opacity 0.12s', cursor: 'grab' }}
-                  onMouseEnter={e => handleNodeEnter(e, node)}
-                  onMouseLeave={handleNodeLeave}
-                  onMouseDown={e => handleNodeMouseDown(e, node)}
-                >
-                  {isParty ? (
-                    <rect
-                      x={-s} y={-s}
-                      width={s * 2} height={s * 2}
-                      rx={r * 0.28}
-                      fill={color}
-                      stroke={isHov ? '#fff' : 'rgba(255,255,255,0.55)'}
-                      strokeWidth={isHov ? 2.5 : 2}
-                    />
-                  ) : (
-                    <circle
-                      r={r}
-                      fill={color}
-                      stroke={isHov ? '#fff' : 'rgba(0,0,0,0.18)'}
-                      strokeWidth={isHov ? 2 : 0.8}
-                    />
-                  )}
-                  {showLabel && (
-                    <text
-                      dy="0.35em"
-                      textAnchor="middle"
-                      className="net-label"
-                      fontSize={Math.min(11, Math.max(6.5, r * 0.52))}
-                      style={{ pointerEvents: 'none', userSelect: 'none' }}
-                    >
-                      {truncate(node.name, maxChars)}
-                    </text>
-                  )}
-                </g>
-              );
-            })}
-
-          </g>
-        </svg>
+        {layoutNarrow && (
+          <div className="network-mobile-bar" role="region" aria-label="Chart controls">
+            <span className="network-mobile-bar__hint">Drag to pan · pinch to zoom</span>
+            <button type="button" className="network-mobile-bar__btn" onClick={resetView}>
+              Fit view
+            </button>
+          </div>
+        )}
+        <div
+          ref={containerRef}
+          className={`network-vis-host${layoutNarrow ? ' network-vis-host--with-bar' : ''}`}
+        />
+        <div className="network-legend" aria-label="Donor category legend">
+          <div className="network-legend__heading">Donor type</div>
+          {Object.entries(CATEGORY_COLORS).map(([name, color]) => (
+            <div key={name} className="network-legend__item">
+              <span className="network-legend__dot" style={{ background: color }} />
+              <span className="network-legend__label">{name}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

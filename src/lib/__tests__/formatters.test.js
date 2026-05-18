@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatCompact, formatFull, truncate } from '../formatters';
+import { formatCompact, formatFull, truncate, formatPct } from '../formatters';
 
 describe('truncate', () => {
   it('returns short strings unchanged', () => {
@@ -30,6 +30,20 @@ describe('formatCompact', () => {
 
   it('includes currency symbol', () => {
     expect(formatCompact(1000)).toContain('$');
+  });
+});
+
+describe('formatPct', () => {
+  it('rounds large shares as whole percents', () => {
+    expect(formatPct(90.4)).toBe('90%');
+  });
+
+  it('keeps one decimal for small shares', () => {
+    expect(formatPct(8.33)).toBe('8.3%');
+  });
+
+  it('handles zero', () => {
+    expect(formatPct(0)).toBe('0%');
   });
 });
 

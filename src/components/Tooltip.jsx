@@ -1,33 +1,72 @@
-import { useEffect, useRef } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 
-export default function Tooltip({ tooltip }) {
+const MARGIN = 14;
+
+function clampTooltipPosition(el, clientX, clientY) {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const rect = el.getBoundingClientRect();
+  const w = rect.width;
+  const h = rect.height;
+
+  let x = clientX + 14;
+  let y = clientY + 12;
+
+  if (x + w > vw - MARGIN) x = clientX - w - 14;
+  if (y + h > vh - MARGIN) y = clientY - h - 14;
+
+  x = Math.max(MARGIN, Math.min(x, vw - w - MARGIN));
+  y = Math.max(MARGIN, Math.min(y, vh - h - MARGIN));
+
+  return { x, y };
+}
+
+export default function Tooltip({ tooltip, onDismiss }) {
   const ref = useRef(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!ref.current || !tooltip) return;
     const el = ref.current;
-    const { innerWidth, innerHeight } = window;
-    const rect = el.getBoundingClientRect();
-
-    let x = tooltip.x + 14;
-    let y = tooltip.y - 10;
-
-    if (x + rect.width > innerWidth - 10) x = tooltip.x - rect.width - 14;
-    if (y + rect.height > innerHeight - 10) y = tooltip.y - rect.height - 10;
-
+    const { x, y } = clampTooltipPosition(el, tooltip.x, tooltip.y);
     el.style.left = `${x}px`;
     el.style.top = `${y}px`;
+    el.style.visibility = 'visible';
   }, [tooltip]);
 
   if (!tooltip) return null;
 
+  const pinned = Boolean(tooltip.pinned);
+
   return (
     <div
       ref={ref}
-      className="tooltip"
-      style={{ left: tooltip.x + 14, top: tooltip.y - 10 }}
+      className={`tooltip${pinned ? ' tooltip--pinned' : ''}`}
+      style={{
+        left: 0,
+        top: 0,
+        visibility: 'hidden',
+        pointerEvents: pinned ? 'auto' : 'none',
+      }}
     >
-      {tooltip.content}
+      {pinned && (
+        <button
+          type="button"
+          className="tooltip-close"
+          aria-label="Close details"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDismiss?.();
+          }}
+        >
+          ×
+        </button>
+      )}
+      <div className="tooltip-inner">
+        {tooltip.content}
+        {pinned && (
+          <p className="tt-dismiss-hint">Press Escape, tap the × above, or click the chart (not a node) to deselect.</p>
+        )}
+      </div>
     </div>
   );
 }

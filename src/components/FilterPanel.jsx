@@ -1,8 +1,8 @@
-export default function FilterPanel({ years, selectedYear, onYearChange }) {
+export default function FilterPanel({ years, selectedYear, onYearChange, className = '' }) {
   const tabs = [{ key: 'combined', label: 'All Years' }, ...years.map(y => ({ key: y, label: y }))];
 
   return (
-    <div className="filter-panel">
+    <div className={`filter-panel ${className}`.trim()}>
       <div className="filter-label">Financial Year</div>
       <div className="filter-tabs">
         {tabs.map(({ key, label }) => (
