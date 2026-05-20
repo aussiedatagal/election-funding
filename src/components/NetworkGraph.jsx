@@ -1,18 +1,15 @@
 import { useRef, useEffect, useMemo, useCallback, useLayoutEffect, useState } from 'react';
 import cytoscape from 'cytoscape';
-import fcose from 'cytoscape-fcose';
 import { CATEGORY_COLORS } from '../lib/partyConfig';
 import { formatFull, truncate, formatPct } from '../lib/formatters';
 import { getDonorInfo, getPartyInfo } from '../lib/entityInfo';
 import {
   buildGraphFromFundingData,
-  buildFcoseLayoutOptions,
-  canUseSavedLayout,
+  layoutPositionsForGraph,
 } from '../lib/networkGraphBuild';
 import { NETWORK_CY_STYLE } from '../lib/networkGraphCyStyle';
+import { buildCyLayoutOptions, layoutFromSearchParams } from '../lib/networkGraphCyLayout';
 import savedLayout from '../data/network-layout.json';
-
-cytoscape.use(fcose);
 
 function MemberName({ name, entityId, onPickEntity }) {
   const label = truncate(name, 32);
@@ -235,13 +232,40 @@ export default function NetworkGraph({ data, onTooltip, tooltipPinned, pinnedLeg
 
   const graph = useMemo(() => buildGraphFromFundingData(data), [data]);
   const {
-    cyElements, graphLinks, flowMap, nodeById, hasNodes, nodeNames,
+    cyElements, graphLinks, flowMap, nodeById, hasNodes,
   } = graph;
 
-  const useSavedLayout = useMemo(
-    () => canUseSavedLayout(nodeNames, savedLayout),
-    [nodeNames]
+  const layoutElements = useMemo(
+    () => cyElements.filter(el => el.group !== 'edges' || !el.data?.isSim),
+    [cyElements],
   );
+
+  const layoutRootId = useMemo(() => {
+    const labor = [...nodeById.entries()].find(([, n]) => n.name === 'Australian Labor Party');
+    return labor?.[0];
+  }, [nodeById]);
+
+  const layoutName = useMemo(
+    () => layoutFromSearchParams(typeof window !== 'undefined' ? window.location.search : ''),
+    [],
+  );
+
+  const editMode = useMemo(
+    () => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('edit') === '1',
+    [],
+  );
+
+  const presetPositions = useMemo(
+    () => layoutPositionsForGraph(nodeById, savedLayout),
+    [nodeById],
+  );
+
+  const viewSettings = useMemo(
+    () => savedLayout?.view ?? { fitTarget: 'all', fitPadding: 36, zoomBoost: 1.0 },
+    [],
+  );
+
+  const useBakedLayout = layoutName === 'semantic' && presetPositions;
 
   useEffect(() => {
     const nameToId = new Map();
@@ -250,8 +274,11 @@ export default function NetworkGraph({ data, onTooltip, tooltipPinned, pinnedLeg
   }, [graphLinks, flowMap, nodeById]);
 
   const resetView = useCallback(() => {
-    cyRef.current?.fit(undefined, layoutNarrow ? 28 : 52);
-  }, [layoutNarrow]);
+    const cy = cyRef.current;
+    if (!cy) return;
+    const pad = layoutNarrow ? Math.max(22, viewSettings.fitPadding - 8) : viewSettings.fitPadding;
+    cy.fit(undefined, pad);
+  }, [layoutNarrow, viewSettings]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -259,37 +286,50 @@ export default function NetworkGraph({ data, onTooltip, tooltipPinned, pinnedLeg
 
     const cy = cytoscape({
       container,
-      elements: cyElements,
+      elements: layoutElements,
       style: NETWORK_CY_STYLE,
       userZoomingEnabled: true,
       userPanningEnabled: true,
       boxSelectionEnabled: false,
+      autoungrabify: false,
       minZoom: 0.1,
       maxZoom: 4,
     });
     cyRef.current = cy;
 
-    const fitPadding = layoutNarrow ? 36 : 56;
-    const afterLayout = () => {
-      cy.fit(undefined, fitPadding);
-      const z = cy.zoom();
-      if (z > 0.12) cy.zoom(z * 0.9);
-    };
+    if (editMode) {
+      window.__exportLayout = () => {
+        const positions = {};
+        cy.nodes().forEach((n) => {
+          const raw = nodeById.get(parseInt(n.id(), 10));
+          if (raw) positions[raw.name] = { x: n.position('x'), y: n.position('y') };
+        });
+        return positions;
+      };
+    }
 
-    if (useSavedLayout && savedLayout.positions) {
+    const fitPadding = layoutNarrow ? Math.max(22, viewSettings.fitPadding - 8) : viewSettings.fitPadding;
+    const afterLayout = () => cy.fit(undefined, fitPadding);
+
+    if (useBakedLayout) {
       cy.layout({
         name: 'preset',
-        positions: node => {
-          const name = nodeById.get(parseInt(node.id(), 10))?.name;
-          return savedLayout.positions[name];
+        positions: (node) => {
+          const n = nodeById.get(parseInt(node.id(), 10));
+          return n ? presetPositions[n.name] : undefined;
         },
-        fit: true,
-        padding: fitPadding,
         stop: afterLayout,
       }).run();
     } else {
+      const layoutOpts = buildCyLayoutOptions(layoutName, {
+        fitPadding,
+        rootNodeId: layoutRootId,
+      });
       cy.layout({
-        ...buildFcoseLayoutOptions(layoutNarrow, { randomize: false }),
+        ...layoutOpts,
+        boundingBox: layoutName === 'circle' || layoutName === 'concentric'
+          ? { x1: 0, y1: 0, w: cy.width(), h: cy.height() }
+          : undefined,
         stop: afterLayout,
       }).run();
     }
@@ -357,7 +397,7 @@ export default function NetworkGraph({ data, onTooltip, tooltipPinned, pinnedLeg
       cy.destroy();
       if (cyRef.current === cy) cyRef.current = null;
     };
-  }, [cyElements, layoutNarrow, hasNodes, useSavedLayout, nodeById]);
+  }, [layoutElements, layoutNarrow, hasNodes, layoutName, layoutRootId, useBakedLayout, presetPositions, nodeById, viewSettings, editMode]);
 
   useEffect(() => {
     if (!tooltipPinned && !pinnedLegendCategory) {
@@ -407,9 +447,14 @@ export default function NetworkGraph({ data, onTooltip, tooltipPinned, pinnedLeg
   return (
     <div className="network-outer">
       <div className="network-container">
-        {layoutNarrow && (
+        {editMode && (
+          <div className="network-mobile-bar" role="region" aria-label="Layout editor">
+            <span className="network-mobile-bar__hint">Drag nodes to adjust · then run npm run snapshot-layout</span>
+          </div>
+        )}
+        {layoutNarrow && !editMode && (
           <div className="network-mobile-bar" role="region" aria-label="Chart controls">
-            <span className="network-mobile-bar__hint">Drag to pan · pinch to zoom</span>
+            <span className="network-mobile-bar__hint">Drag nodes · pinch to zoom · pan background</span>
             <button type="button" className="network-mobile-bar__btn" onClick={resetView}>
               Fit view
             </button>
@@ -418,7 +463,7 @@ export default function NetworkGraph({ data, onTooltip, tooltipPinned, pinnedLeg
         <div className="network-legend" aria-label="Donor category legend">
           <div className="network-legend__heading-row">
             <div className="network-legend__heading">Donor type</div>
-            <p className="network-legend__scale-hint">Bigger dots &amp; party boxes = more total · thicker lines = each gift · click for amounts</p>
+            <p className="network-legend__scale-hint">Drag nodes to rearrange · bigger dots &amp; party boxes = more total · thicker lines = each gift · click for amounts</p>
           </div>
           <div className="network-legend__grid">
             {Object.entries(CATEGORY_COLORS).map(([name, color]) => {

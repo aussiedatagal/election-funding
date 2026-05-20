@@ -1,0 +1,82 @@
+[
+  {
+    "id": "spread",
+    "score": 20.47026845637584,
+    "partyOverlap": 0,
+    "aspect": 0.75,
+    "readability": 8.2,
+    "spanX": 1390,
+    "spanY": 1859,
+    "clusterScore": 3,
+    "offScreen": 43,
+    "view": {
+      "fitTarget": "party",
+      "fitPadding": 32,
+      "zoomBoost": 1.15
+    }
+  },
+  {
+    "id": "compact",
+    "score": 16.310618870133677,
+    "partyOverlap": 0,
+    "aspect": 0.5,
+    "readability": 4.1,
+    "spanX": 1149,
+    "spanY": 2297,
+    "clusterScore": 2,
+    "offScreen": 0,
+    "view": {
+      "fitTarget": "all",
+      "fitPadding": 44,
+      "zoomBoost": 1
+    }
+  },
+  {
+    "id": "balanced",
+    "score": 12.457900230237913,
+    "partyOverlap": 0,
+    "aspect": 0.54,
+    "readability": 5.7,
+    "spanX": 1285,
+    "spanY": 2400,
+    "clusterScore": 3,
+    "offScreen": 26,
+    "view": {
+      "fitTarget": "party",
+      "fitPadding": 38,
+      "zoomBoost": 1.14
+    }
+  },
+  {
+    "id": "wide",
+    "score": 12.11012739309358,
+    "partyOverlap": 0,
+    "aspect": 0.47,
+    "readability": 4,
+    "spanX": 1517,
+    "spanY": 3244,
+    "clusterScore": 3,
+    "offScreen": 23,
+    "view": {
+      "fitTarget": "party",
+      "fitPadding": 36,
+      "zoomBoost": 1.12
+    }
+  },
+  {
+    "id": "baseline",
+    "score": 12.093589550836311,
+    "partyOverlap": 0,
+    "aspect": 0.45,
+    "readability": 3.9,
+    "spanX": 1380,
+    "spanY": 3083,
+    "clusterScore": 3,
+    "offScreen": 23,
+    "view": {
+      "fitTarget": "party",
+      "fitPadding": 40,
+      "zoomBoost": 1.08
+    }
+  }
+]

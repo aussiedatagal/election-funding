@@ -154,6 +154,51 @@ export function scoreLayout(cy) {
   return -overlapArea - densityPenalty * 8000;
 }
 
+/** Cosine similarity of donor donation profiles — drives party clustering. */
+export function computePartySimilarity(graphLinks, nodeById) {
+  const partyIds = [];
+  const donorIds = [];
+  nodeById.forEach((node, id) => {
+    if (node.type === 'party') partyIds.push(id);
+    else if (node.type === 'donor') donorIds.push(id);
+  });
+
+  const donorIndex = new Map(donorIds.map((id, i) => [id, i]));
+  const vectors = new Map(partyIds.map(id => [id, new Float64Array(donorIds.length)]));
+
+  for (const link of graphLinks) {
+    const src = nodeById.get(link.source);
+    const tgt = nodeById.get(link.target);
+    if (src?.type !== 'donor' || tgt?.type !== 'party') continue;
+    const idx = donorIndex.get(link.source);
+    if (idx == null) continue;
+    vectors.get(link.target)[idx] += Math.log1p(link.value);
+  }
+
+  const edges = [];
+  for (let i = 0; i < partyIds.length; i++) {
+    for (let j = i + 1; j < partyIds.length; j++) {
+      const p1 = partyIds[i];
+      const p2 = partyIds[j];
+      const a = vectors.get(p1);
+      const b = vectors.get(p2);
+      let dot = 0;
+      let na = 0;
+      let nb = 0;
+      for (let k = 0; k < a.length; k++) {
+        dot += a[k] * b[k];
+        na += a[k] * a[k];
+        nb += b[k] * b[k];
+      }
+      if (!na || !nb) continue;
+      const norm = dot / Math.sqrt(na * nb);
+      if (norm < 0.08) continue;
+      edges.push({ p1, p2, norm });
+    }
+  }
+  return edges;
+}
+
 export function buildGraphFromFundingData(data) {
   const empty = {
     cyElements: [],
@@ -290,13 +335,26 @@ export function buildGraphFromFundingData(data) {
   };
 }
 
+/** Centre positions without scaling — scaling shrinks coords but not node sizes, causing overlap. */
+export function centerLayoutPositions(positions) {
+  const pts = Object.values(positions);
+  if (!pts.length) return positions;
+  const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+  const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+  const out = {};
+  for (const [name, p] of Object.entries(positions)) {
+    out[name] = { x: p.x - cx, y: p.y - cy };
+  }
+  return out;
+}
+
 export function layoutPositionsForGraph(nodeById, savedLayout) {
   if (!savedLayout?.positions) return null;
   const names = [...nodeById.values()].map(n => n.name);
   const positions = {};
   for (const name of names) {
     const p = savedLayout.positions[name];
-    if (!p) return null;
+    if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return null;
     positions[name] = p;
   }
   return positions;

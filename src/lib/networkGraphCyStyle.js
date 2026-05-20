@@ -26,7 +26,7 @@ export const NETWORK_CY_STYLE = [
       'padding': 10,
       'border-width': 'data(borderWidth)',
       'border-color': 'rgba(255,255,255,0.55)',
-      'cursor': 'pointer',
+      'cursor': 'grab',
     },
   },
   {
@@ -38,7 +38,7 @@ export const NETWORK_CY_STYLE = [
       'height': 'data(size)',
       'border-width': 'data(borderWidth)',
       'border-color': 'rgba(15,23,42,0.35)',
-      'cursor': 'pointer',
+      'cursor': 'grab',
     },
   },
   {
@@ -70,7 +70,7 @@ export const NETWORK_CY_STYLE = [
       'color': '#1a1d27',
       'text-outline-color': '#ffffff',
       'text-outline-width': 2,
-      'cursor': 'pointer',
+      'cursor': 'grab',
     },
   },
   { selector: 'edge.highlighted', style: { 'opacity': 0.92, 'width': 'data(highlightWidth)' } },
