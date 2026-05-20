@@ -189,7 +189,7 @@ DONOR_CATEGORY_KEYWORDS: list[tuple[str, list[str]]] = [
         "meriton", "pratt", "property", "construction", "real estate",
         "developer", "building", "realty",
     ]),
-    ("Progressive Networks", [
+    ("Climate & teal", [
         "climate 200", "getup", "environment", "conservation",
         "turpie", "lb conservation", "progressive business",
     ]),
@@ -198,7 +198,7 @@ DONOR_CATEGORY_KEYWORDS: list[tuple[str, list[str]]] = [
         "management", "nominees", "trust", "fund", "asset",
         "cormack", "oryxium", "stonehill", "sugolena",
     ]),
-    ("Party-Affiliated", [
+    ("Party fundraising", [
         "labor holdings", "labor services", "cormack foundation",
         "progressive business", "kooyong", "liberal", "national party",
         "labor party", "greens", "alp", "branch alp",
@@ -228,24 +228,24 @@ DONOR_KNOWN: dict[str, str] = {
     "hsu - health services union- nsw": "Unions",
     "nsw local government clerical administrative energy airlines & utilities union": "Unions",
     "plumbing and pipe trades employees union": "Unions",
-    "labor holdings pty ltd": "Party-Affiliated",
-    "cormack foundation pty ltd": "Party-Affiliated",
-    "cormack foundation pty limited": "Party-Affiliated",
-    "cormack foundation": "Party-Affiliated",
-    "kooyong 200 club": "Party-Affiliated",
-    "labor services & holdings pty ltd atf labor services & holdings trust": "Party-Affiliated",
-    "labor services &  holding pty ltd atf the labor services and holding trust": "Party-Affiliated",
-    "labor legacies pty ltd": "Party-Affiliated",
-    "the australian labor party national secretariat": "Party-Affiliated",
-    "sa porgressive business": "Party-Affiliated",
-    "sa progressive business": "Party-Affiliated",
+    "labor holdings pty ltd": "Party fundraising",
+    "cormack foundation pty ltd": "Party fundraising",
+    "cormack foundation pty limited": "Party fundraising",
+    "cormack foundation": "Party fundraising",
+    "kooyong 200 club": "Party fundraising",
+    "labor services & holdings pty ltd atf labor services & holdings trust": "Party fundraising",
+    "labor services &  holding pty ltd atf the labor services and holding trust": "Party fundraising",
+    "labor legacies pty ltd": "Party fundraising",
+    "the australian labor party national secretariat": "Party fundraising",
+    "sa porgressive business": "Party fundraising",
+    "sa progressive business": "Party fundraising",
     "pratt holdings": "Property & Development",
     "pratt holdings pty ltd": "Property & Development",
     "pratt holdings pty limited": "Property & Development",
     "meriton property services": "Property & Development",
-    "climate 200": "Progressive Networks",
-    "lb conservation pty ltd": "Progressive Networks",
-    "duncan turpie": "Progressive Networks",
+    "climate 200": "Climate & teal",
+    "lb conservation pty ltd": "Climate & teal",
+    "duncan turpie": "Climate & teal",
     "oryxium investments limited": "Finance & Investment",
     "oryxium investments limited": "Finance & Investment",
     "stonehill nominees": "Finance & Investment",
@@ -258,7 +258,7 @@ DONOR_KNOWN: dict[str, str] = {
     "fox group holdings": "Finance & Investment",
     "jefferson investments pty ltd": "Finance & Investment",
     "vapold pty ltd": "Property & Development",
-    "doordash technologies australia pty ltd": "Technology & Other Corporate",
+    "doordash technologies australia pty ltd": "Other companies",
     "lgt crestone wealth management limited": "Finance & Investment",
     "heston russell": "Individual Donor",
     "angus aitken": "Individual Donor",
@@ -277,9 +277,9 @@ DONOR_KNOWN: dict[str, str] = {
     "estate of the late david walsh": "Individual Donor",
     "transcendent australia": "Property & Development",
     "transcendent australia pty ltd": "Property & Development",
-    "australian romance": "Other Corporate",
-    "australian romance pty ltd": "Other Corporate",
-    "msz australian romance": "Other Corporate",
+    "australian romance": "Other companies",
+    "australian romance pty ltd": "Other companies",
+    "msz australian romance": "Other companies",
 }
 
 # Party-internal transfer donors (state branches donating to national party)
@@ -320,7 +320,7 @@ def categorise_donor(name: str) -> str:
         # Likely an individual
         return "Individual Donor"
 
-    return "Other Corporate"
+    return "Other companies"
 
 
 # --- Donor name normalisation ----------------------------------------
@@ -639,7 +639,7 @@ def compute_positions_data_driven(
     for d in all_donors:
         shown = {p for p in donor_parties[d] if p in shown_parties}
         if len(shown) > 1:
-            cat = donor_categories.get(d, "Other Corporate")
+            cat = donor_categories.get(d, "Other companies")
             total = sum(v for p, v in donor_parties[d].items() if p in shown_parties)
             cat_entries[cat].append((donor_pos[d], total))
 
@@ -659,7 +659,7 @@ def compute_positions_data_driven(
         if is_isolated and donors:
             total = sum(donors.values())
             est = sum(
-                category_lean.get(donor_categories.get(d, "Other Corporate"), 0.5) * v / total
+                category_lean.get(donor_categories.get(d, "Other companies"), 0.5) * v / total
                 for d, v in donors.items()
             )
             party_pos[p] = est
@@ -737,7 +737,7 @@ def build_sankey(year_data: dict[tuple[str, str], float],
         if donor in shown_donors:
             source = donor
         else:
-            cat = donor_categories.get(donor, "Other Corporate")
+            cat = donor_categories.get(donor, "Other companies")
             source = f"Other — {cat}"
             group_members_by_party[source][donor][party_family] += val
 
@@ -842,7 +842,7 @@ def build_sankey(year_data: dict[tuple[str, str], float],
                 "id": node_index[name],
                 "name": name,
                 "type": "donor",
-                "category": donor_categories.get(name, "Other Corporate"),
+                "category": donor_categories.get(name, "Other companies"),
                 "primaryParty": primary,
                 "sortKey": donor_pos.get(name, 12.0),
             }

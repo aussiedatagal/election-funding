@@ -41,16 +41,16 @@ export const PARTY_COLORS = {
   'Other / Minor Parties':           '#78909C',
 };
 
+// Donor categories — hues spaced for legend/graph distinction (not party colours).
 export const CATEGORY_COLORS = {
-  'Mining & Resources':              '#BF360C',
-  'Unions':                          '#B71C1C',
-  'Property & Development':          '#1565C0',
-  'Progressive Networks':            '#00695C',
-  'Finance & Investment':            '#4527A0',
-  'Party-Affiliated':                '#757575',
-  'Individual Donor':                '#F57F17',
-  'Technology & Other Corporate':    '#37474F',
-  'Other Corporate':                 '#546E7A',
+  'Mining & Resources':              '#E65100',  // orange
+  'Unions':                          '#D32F2F',  // red
+  'Property & Development':          '#1976D2',  // blue
+  'Climate & teal':                  '#00BCD4',  // cyan
+  'Finance & Investment':            '#7B1FA2',  // purple
+  'Party fundraising':               '#9E9E9E',  // neutral grey
+  'Individual Donor':                '#FFB300',  // gold
+  'Other companies':                 '#607D8B',  // blue-grey
 };
 
 export const PARTY_ORDER = [
@@ -86,5 +86,5 @@ export function partyColor(name) {
 }
 
 export function categoryColor(name) {
-  return CATEGORY_COLORS[name] ?? '#546E7A';
+  return CATEGORY_COLORS[name] ?? '#607D8B';
 }

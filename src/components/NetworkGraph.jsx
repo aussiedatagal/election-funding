@@ -29,7 +29,23 @@ function splitLabelLines(name, maxPerLine) {
   return [line1, truncate(rest, maxPerLine)];
 }
 
-function buildNodeTooltipBody(node, flowMap, linksArr, nodeById) {
+function MemberName({ name, entityId, onPickEntity }) {
+  const label = truncate(name, 28);
+  if (entityId != null && onPickEntity) {
+    return (
+      <button
+        type="button"
+        className="tt-member-link"
+        onClick={() => onPickEntity(entityId)}
+      >
+        {label}
+      </button>
+    );
+  }
+  return <span className="tt-member-name">{label}</span>;
+}
+
+function buildNodeTooltipBody(node, flowMap, linksArr, nodeById, nameToId, onPickEntity) {
   const isParty = node.type === 'party';
   const isGroup = node.type === 'donor_group';
   const total = flowMap.get(node.id) || 0;
@@ -45,11 +61,16 @@ function buildNodeTooltipBody(node, flowMap, linksArr, nodeById) {
       const t = l.target?.id ?? l.target;
       return isParty ? t === node.id : s === node.id;
     })
-    .map(l => ({
-      name: isParty ? (nameFor(l.source) ?? '?') : (nameFor(l.target) ?? '?'),
-      value: l.value,
-      pct: total > 0 ? (100 * l.value) / total : 0,
-    }))
+    .map(l => {
+      const otherId = isParty ? (l.source?.id ?? l.source) : (l.target?.id ?? l.target);
+      const name = isParty ? (nameFor(l.source) ?? '?') : (nameFor(l.target) ?? '?');
+      return {
+        name,
+        entityId: nameToId?.get(name) ?? otherId,
+        value: l.value,
+        pct: total > 0 ? (100 * l.value) / total : 0,
+      };
+    })
     .sort((a, b) => b.value - a.value);
 
   const shownBreakdown = breakdown.slice(0, 10);
@@ -71,10 +92,17 @@ function buildNodeTooltipBody(node, flowMap, linksArr, nodeById) {
         <div className="tt-members">
           <div className="tt-members-heading">
             {isParty ? 'From donors' : 'Donations to parties'}
+            {onPickEntity && (
+              <span className="tt-members-sub"> · tap a name to explore</span>
+            )}
           </div>
           {shownBreakdown.map(item => (
             <div key={item.name} className="tt-member-row">
-              <span className="tt-member-name">{truncate(item.name, 28)}</span>
+              <MemberName
+                name={item.name}
+                entityId={item.entityId}
+                onPickEntity={onPickEntity}
+              />
               <span className="tt-member-pct">{formatPct(item.pct)}</span>
               <span className="tt-member-amt">{formatFull(item.value)}</span>
             </div>
@@ -83,6 +111,95 @@ function buildNodeTooltipBody(node, flowMap, linksArr, nodeById) {
         </div>
       )}
       {info && <div className="tt-info">{info}</div>}
+    </div>
+  );
+}
+
+function buildCategoryTooltipBody(category, graphLinks, flowMap, nodeById, nameToId, onPickEntity) {
+  const donorIds = new Set(
+    [...nodeById.values()]
+      .filter(n => n.type === 'donor' && n.category === category)
+      .map(n => n.id)
+  );
+
+  let total = 0;
+  const donorTotals = new Map();
+  const partyTotals = new Map();
+
+  graphLinks.forEach(l => {
+    if (!donorIds.has(l.source)) return;
+    total += l.value;
+    donorTotals.set(l.source, (donorTotals.get(l.source) || 0) + l.value);
+    const party = nodeById.get(l.target);
+    if (party) {
+      partyTotals.set(party.name, (partyTotals.get(party.name) || 0) + l.value);
+    }
+  });
+
+  const topDonors = [...donorTotals.entries()]
+    .map(([id, value]) => ({
+      name: nodeById.get(id)?.name ?? '?',
+      entityId: id,
+      value,
+      pct: total > 0 ? (100 * value) / total : 0,
+    }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 8);
+
+  const topParties = [...partyTotals.entries()]
+    .map(([name, value]) => ({
+      name,
+      entityId: nameToId?.get(name),
+      value,
+      pct: total > 0 ? (100 * value) / total : 0,
+    }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 6);
+
+  return (
+    <div className="tt-body">
+      <div className="tt-name">{category}</div>
+      <div className="tt-meta">Donor category · {donorIds.size} donor{donorIds.size === 1 ? '' : 's'} shown</div>
+      <div className="tt-amount">
+        Total donated: <strong>{formatFull(total)}</strong>
+      </div>
+      {topDonors.length > 0 && (
+        <div className="tt-members">
+          <div className="tt-members-heading">
+            Top donors
+            {onPickEntity && (
+              <span className="tt-members-sub"> · tap a name to explore</span>
+            )}
+          </div>
+          {topDonors.map(item => (
+            <div key={item.name} className="tt-member-row">
+              <MemberName
+                name={item.name}
+                entityId={item.entityId}
+                onPickEntity={onPickEntity}
+              />
+              <span className="tt-member-pct">{formatPct(item.pct)}</span>
+              <span className="tt-member-amt">{formatFull(item.value)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {topParties.length > 0 && (
+        <div className="tt-members">
+          <div className="tt-members-heading">Received by parties</div>
+          {topParties.map(item => (
+            <div key={item.name} className="tt-member-row">
+              <MemberName
+                name={item.name}
+                entityId={item.entityId}
+                onPickEntity={onPickEntity}
+              />
+              <span className="tt-member-pct">{formatPct(item.pct)}</span>
+              <span className="tt-member-amt">{formatFull(item.value)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -167,20 +284,24 @@ const CY_STYLE = [
   { selector: 'edge.highlighted', style: { 'opacity': 0.9, 'width': 'data(highlightWidth)' } },
 ];
 
-export default function NetworkGraph({ data, onTooltip, tooltipPinned }) {
+export default function NetworkGraph({ data, onTooltip, tooltipPinned, pinnedLegendCategory }) {
   const containerRef = useRef(null);
   const cyRef = useRef(null);
   const onTooltipRef = useRef(onTooltip);
   const tooltipPinnedRef = useRef(tooltipPinned);
+  const highlightApiRef = useRef({ clear: () => {}, applyCategory: () => {}, applyNode: () => {} });
   // Holds the latest raw graph data so event handlers don't go stale between rebuilds
-  const dataRef = useRef({ graphLinks: [], flowMap: new Map(), nodeById: new Map() });
+  const dataRef = useRef({ graphLinks: [], flowMap: new Map(), nodeById: new Map(), nameToId: new Map() });
 
   const [layoutNarrow, setLayoutNarrow] = useState(
     () => typeof window !== 'undefined' && window.innerWidth <= 640
   );
+  const [hoverLegendCategory, setHoverLegendCategory] = useState(null);
+  const hoverLegendCategoryRef = useRef(null);
 
   useEffect(() => { onTooltipRef.current = onTooltip; }, [onTooltip]);
   useEffect(() => { tooltipPinnedRef.current = tooltipPinned; }, [tooltipPinned]);
+  useEffect(() => { hoverLegendCategoryRef.current = hoverLegendCategory; }, [hoverLegendCategory]);
 
   useLayoutEffect(() => {
     const el = containerRef.current;
@@ -249,7 +370,14 @@ export default function NetworkGraph({ data, onTooltip, tooltipPinned }) {
       const label = isParty ? splitLabelLines(n.name, 18).join('\n') : n.name;
       return {
         group: 'nodes',
-        data: { id: String(n.id), label, type: n.type, color: nodeColor(n), size },
+        data: {
+          id: String(n.id),
+          label,
+          type: n.type,
+          category: n.category ?? '',
+          color: nodeColor(n),
+          size,
+        },
       };
     });
 
@@ -302,7 +430,9 @@ export default function NetworkGraph({ data, onTooltip, tooltipPinned }) {
   }, [data]);
 
   useEffect(() => {
-    dataRef.current = { graphLinks, flowMap, nodeById };
+    const nameToId = new Map();
+    nodeById.forEach((n) => nameToId.set(n.name, n.id));
+    dataRef.current = { graphLinks, flowMap, nodeById, nameToId };
   }, [graphLinks, flowMap, nodeById]);
 
   const resetView = useCallback(() => {
@@ -360,41 +490,48 @@ export default function NetworkGraph({ data, onTooltip, tooltipPinned }) {
       neighbours.removeClass('faded');
     };
 
-    // Click node → pin highlight + tooltip
-    cy.on('tap', 'node', evt => {
-      const cyNode = evt.target;
-      const rawNode = dataRef.current.nodeById.get(parseInt(cyNode.id(), 10));
-      if (!rawNode) return;
+    const applyCategoryHighlight = category => {
+      const donors = cy.nodes('[type = "donor"]').filter(n => n.data('category') === category);
+      const edges = donors.connectedEdges().filter(e => !e.data('isSim'));
+      const parties = edges.connectedNodes().filter(n => n.data('type') === 'party');
+      cy.elements().addClass('faded');
+      donors.removeClass('faded').addClass('highlighted');
+      edges.removeClass('faded').addClass('highlighted');
+      parties.removeClass('faded');
+    };
+
+    const showNodeDetail = (nodeId) => {
+      const { graphLinks: gl, flowMap: fm2, nodeById: nb, nameToId: nt } = dataRef.current;
+      const rawNode = nb.get(nodeId);
+      const cyNode = cy.getElementById(String(nodeId));
+      if (!rawNode || !cyNode.length) return;
       applyHighlight(cyNode);
-      const { graphLinks: gl, flowMap: fm2, nodeById: nb } = dataRef.current;
+      const focus = cyNode.closedNeighborhood();
+      cy.animate({
+        fit: { eles: focus.nonempty() ? focus : cyNode, padding: layoutNarrow ? 28 : 48 },
+      }, { duration: 280 });
+      const pickEntity = (id) => showNodeDetail(id);
       onTooltipRef.current({
-        x: evt.originalEvent?.clientX ?? 0,
-        y: evt.originalEvent?.clientY ?? 0,
         pinned: true,
-        content: buildNodeTooltipBody(rawNode, fm2, gl, nb),
+        panel: true,
+        nodeId,
+        legendCategory: null,
+        content: buildNodeTooltipBody(rawNode, fm2, gl, nb, nt, pickEntity),
       });
-    });
+    };
 
-    // Hover node → transient tooltip (skip if something is pinned)
-    cy.on('mouseover', 'node', evt => {
-      if (tooltipPinnedRef.current) return;
-      const cyNode = evt.target;
-      const rawNode = dataRef.current.nodeById.get(parseInt(cyNode.id(), 10));
+    highlightApiRef.current = {
+      clear: clearHighlight,
+      applyCategory: applyCategoryHighlight,
+      applyNode: applyHighlight,
+      showNode: showNodeDetail,
+    };
+
+    // Click node → highlight + detail panel below chart (click only, no hover popup)
+    cy.on('tap', 'node', evt => {
+      const rawNode = dataRef.current.nodeById.get(parseInt(evt.target.id(), 10));
       if (!rawNode) return;
-      applyHighlight(cyNode);
-      const { graphLinks: gl, flowMap: fm2, nodeById: nb } = dataRef.current;
-      onTooltipRef.current({
-        x: evt.originalEvent?.clientX ?? 0,
-        y: evt.originalEvent?.clientY ?? 0,
-        pinned: false,
-        content: buildNodeTooltipBody(rawNode, fm2, gl, nb),
-      });
-    });
-
-    cy.on('mouseout', 'node', () => {
-      if (tooltipPinnedRef.current) return;
-      clearHighlight();
-      onTooltipRef.current(null);
+      showNodeDetail(rawNode.id);
     });
 
     // Click background → clear everything
@@ -409,6 +546,47 @@ export default function NetworkGraph({ data, onTooltip, tooltipPinned }) {
       if (cyRef.current === cy) cyRef.current = null;
     };
   }, [cyElements, layoutNarrow, hasNodes]);
+
+  useEffect(() => {
+    if (!tooltipPinned && !pinnedLegendCategory) {
+      highlightApiRef.current.clear?.();
+      setHoverLegendCategory(null);
+      return;
+    }
+    if (pinnedLegendCategory) {
+      highlightApiRef.current.applyCategory?.(pinnedLegendCategory);
+    }
+  }, [tooltipPinned, pinnedLegendCategory, cyElements]);
+
+  const handleLegendEnter = useCallback((category) => {
+    if (tooltipPinnedRef.current) return;
+    setHoverLegendCategory(category);
+    highlightApiRef.current.applyCategory?.(category);
+  }, []);
+
+  const handleLegendLeave = useCallback(() => {
+    if (tooltipPinnedRef.current) return;
+    setHoverLegendCategory(null);
+    highlightApiRef.current.clear?.();
+  }, []);
+
+  const handleLegendClick = useCallback((category) => {
+    const { graphLinks: gl, flowMap: fm2, nodeById: nb, nameToId: nt } = dataRef.current;
+    if (pinnedLegendCategory === category) {
+      onTooltipRef.current(null);
+      highlightApiRef.current.clear?.();
+      return;
+    }
+    highlightApiRef.current.applyCategory?.(category);
+    const pickEntity = (id) => highlightApiRef.current.showNode?.(id);
+    onTooltipRef.current({
+      pinned: true,
+      panel: true,
+      nodeId: null,
+      legendCategory: category,
+      content: buildCategoryTooltipBody(category, gl, fm2, nb, nt, pickEntity),
+    });
+  }, [pinnedLegendCategory]);
 
   if (!hasNodes) {
     return <div className="chart-empty">No data for this selection.</div>;
@@ -425,19 +603,35 @@ export default function NetworkGraph({ data, onTooltip, tooltipPinned }) {
             </button>
           </div>
         )}
+        <div className="network-legend" aria-label="Donor category legend">
+          <div className="network-legend__heading">Donor type</div>
+          <div className="network-legend__grid">
+            {Object.entries(CATEGORY_COLORS).map(([name, color]) => {
+              const isPinned = pinnedLegendCategory === name;
+              const isHover = hoverLegendCategory === name && !isPinned;
+              return (
+                <button
+                  key={name}
+                  type="button"
+                  className={`network-legend__item${isPinned ? ' network-legend__item--pinned' : ''}${isHover ? ' network-legend__item--hover' : ''}`}
+                  onMouseEnter={() => handleLegendEnter(name)}
+                  onMouseLeave={handleLegendLeave}
+                  onFocus={() => handleLegendEnter(name)}
+                  onBlur={handleLegendLeave}
+                  onClick={() => handleLegendClick(name)}
+                  aria-pressed={isPinned}
+                >
+                  <span className="network-legend__dot" style={{ background: color }} aria-hidden />
+                  <span className="network-legend__label">{name}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
         <div
           ref={containerRef}
           className={`network-vis-host${layoutNarrow ? ' network-vis-host--with-bar' : ''}`}
         />
-        <div className="network-legend" aria-label="Donor category legend">
-          <div className="network-legend__heading">Donor type</div>
-          {Object.entries(CATEGORY_COLORS).map(([name, color]) => (
-            <div key={name} className="network-legend__item">
-              <span className="network-legend__dot" style={{ background: color }} />
-              <span className="network-legend__label">{name}</span>
-            </div>
-          ))}
-        </div>
       </div>
     </div>
   );

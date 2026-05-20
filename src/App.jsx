@@ -4,6 +4,7 @@ import SankeyChart from './components/SankeyChart';
 import NetworkGraph from './components/NetworkGraph';
 import FilterPanel from './components/FilterPanel';
 import Tooltip from './components/Tooltip';
+import DetailPanel from './components/DetailPanel';
 import HeroVisual from './components/HeroVisual';
 
 function totalFlow(sankey) {
@@ -47,11 +48,17 @@ export default function App() {
 
         <div className="chart-shell chart-shell--bleed">
           {activeChart === 'network' ? (
-            <NetworkGraph
-              data={currentData}
-              onTooltip={handleTooltip}
-              tooltipPinned={Boolean(tooltip?.pinned)}
-            />
+            <div className="network-block">
+              <NetworkGraph
+                data={currentData}
+                onTooltip={handleTooltip}
+                tooltipPinned={Boolean(tooltip?.pinned)}
+                pinnedLegendCategory={tooltip?.legendCategory ?? null}
+              />
+              {tooltip?.panel && (
+                <DetailPanel detail={tooltip} onDismiss={dismissTooltip} />
+              )}
+            </div>
           ) : (
             <SankeyChart data={currentData} onTooltip={handleTooltip} />
           )}
@@ -144,7 +151,7 @@ export default function App() {
         </p>
       </footer>
 
-      <Tooltip tooltip={tooltip} onDismiss={dismissTooltip} />
+      <Tooltip tooltip={tooltip?.panel ? null : tooltip} onDismiss={dismissTooltip} />
 
     </div>
   );

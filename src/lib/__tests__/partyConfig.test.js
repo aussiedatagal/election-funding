@@ -20,7 +20,7 @@ describe('categoryColor', () => {
   });
 
   it('returns fallback for unknown category', () => {
-    expect(categoryColor('Unknown Category')).toBe('#546E7A');
+    expect(categoryColor('Unknown Category')).toBe('#607D8B');
   });
 });
 
