@@ -1,32 +1,43 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import fundingData from './data/funding.json';
-import SankeyChart from './components/SankeyChart';
 import NetworkGraph from './components/NetworkGraph';
 import FilterPanel from './components/FilterPanel';
-import Tooltip from './components/Tooltip';
 import DetailPanel from './components/DetailPanel';
 import HeroVisual from './components/HeroVisual';
+import { getFundingForYears } from './lib/mergeFundingYears';
 
-function totalFlow(sankey) {
-  if (!sankey?.links) return 0;
-  return sankey.links.reduce((s, l) => s + l.value, 0);
+function totalFlow(data) {
+  if (!data?.links) return 0;
+  return data.links.reduce((s, l) => s + l.value, 0);
 }
 
 export default function App() {
-  const [selectedYear, setSelectedYear] = useState('combined');
+  const [selectedYears, setSelectedYears] = useState(() => [...fundingData.years]);
   const [tooltip, setTooltip] = useState(null);
-  const [activeChart, setActiveChart] = useState('network');
 
-  const currentData = selectedYear === 'combined'
-    ? fundingData.combined
-    : fundingData.byYear[selectedYear];
+  const currentData = useMemo(
+    () => getFundingForYears(fundingData, selectedYears),
+    [selectedYears]
+  );
+
+  const handleToggleYear = useCallback((year) => {
+    setSelectedYears((prev) => {
+      if (prev.includes(year)) {
+        if (prev.length <= 1) return prev;
+        return prev.filter((y) => y !== year);
+      }
+      const next = [...prev, year];
+      next.sort((a, b) => fundingData.years.indexOf(a) - fundingData.years.indexOf(b));
+      return next;
+    });
+  }, []);
 
   const handleTooltip = useCallback((t) => setTooltip(t), []);
   const dismissTooltip = useCallback(() => setTooltip(null), []);
 
   useEffect(() => {
     setTooltip(null);
-  }, [activeChart, selectedYear]);
+  }, [selectedYears]);
 
   useEffect(() => {
     if (!tooltip?.pinned) return;
@@ -47,96 +58,49 @@ export default function App() {
       <main className="main-content main-content--flush-top">
 
         <div className="chart-shell chart-shell--bleed">
-          {activeChart === 'network' ? (
-            <div className="network-block">
-              <NetworkGraph
-                data={currentData}
-                onTooltip={handleTooltip}
-                tooltipPinned={Boolean(tooltip?.pinned)}
-                pinnedLegendCategory={tooltip?.legendCategory ?? null}
-              />
-              {tooltip?.panel && (
-                <DetailPanel detail={tooltip} onDismiss={dismissTooltip} />
-              )}
-            </div>
-          ) : (
-            <SankeyChart data={currentData} onTooltip={handleTooltip} />
-          )}
+          <div className="network-block">
+            <NetworkGraph
+              data={currentData}
+              onTooltip={handleTooltip}
+              tooltipPinned={Boolean(tooltip?.pinned)}
+              pinnedLegendCategory={tooltip?.legendCategory ?? null}
+            />
+            {tooltip?.panel && (
+              <DetailPanel detail={tooltip} onDismiss={dismissTooltip} />
+            )}
+          </div>
         </div>
 
         <div className="chart-controls-footer">
-          <div className="chart-toggle chart-toggle--footer">
-            <button
-              type="button"
-              className={`chart-tab${activeChart === 'network' ? ' active' : ''}`}
-              onClick={() => setActiveChart('network')}
-            >
-              Network graph
-            </button>
-            <button
-              type="button"
-              className={`chart-tab${activeChart === 'sankey' ? ' active' : ''}`}
-              onClick={() => setActiveChart('sankey')}
-            >
-              Sankey flow
-            </button>
-          </div>
           <FilterPanel
             className="filter-panel--footer"
             years={fundingData.years}
-            selectedYear={selectedYear}
-            onYearChange={setSelectedYear}
+            selectedYears={selectedYears}
+            onToggleYear={handleToggleYear}
           />
         </div>
 
         <section className="about-section">
           <h2>About this data</h2>
-          <div className="about-grid">
-            <div>
-              <h3>Source</h3>
-              <p>
-                All figures come from the{' '}
-                <a
-                  href="https://transparency.aec.gov.au/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  AEC Transparency Register
-                </a>{' '}
-                (bulk download, &quot;Detailed Receipts&quot; from Political Party Returns).
-                Data covers financial years 2019–20 to 2024–25.
-              </p>
-            </div>
-            <div>
-              <h3>What&apos;s included</h3>
-              <p>
-                Only <em>Donation Received</em> entries declared in Political Party
-                Returns. The AEC disclosure threshold in 2024–25 is ~$16,300;
-                donations below that are not reported individually and are not shown.
-              </p>
-            </div>
-            <div>
-              <h3>What&apos;s excluded</h3>
-              <p>
-                Public funding (AEC and state electoral commission payments), tax
-                refunds, bank interest, loans, and intra-party transfers between
-                state and national branches. All of these are &quot;Other Receipt&quot; not
-                &quot;Donation Received&quot; and are filtered out.
-              </p>
-            </div>
-            <div>
-              <h3>Why this matters</h3>
-              <p>
-                Politicians represent the interests of those who fund them. Check
-                whose money aligns with your interests before you vote. If a party&apos;s
-                major donors are mining companies, their policies will reflect that;
-                if yours are unions, same story.
-              </p>
-            </div>
+          <div className="about-copy">
+            <p>
+              Figures are from the{' '}
+              <a
+                href="https://transparency.aec.gov.au/"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Australian Electoral Commission Transparency Register
+              </a>
+              {' '}(financial years 2019–20 to 2024–25). This site is not affiliated with the AEC.
+            </p>
+            <p>
+              Only declared political donations above the annual disclosure threshold are
+              shown (about $16,300 in 2024–25; the threshold changes each year). Smaller
+              gifts are not reported individually. Public funding, loans, and other
+              non-donation receipts are excluded.
+            </p>
           </div>
-          <p className="about-footnote">
-            {fundingData.notes}
-          </p>
         </section>
 
       </main>
@@ -150,8 +114,6 @@ export default function App() {
           Not affiliated with the AEC. Built with open data.
         </p>
       </footer>
-
-      <Tooltip tooltip={tooltip?.panel ? null : tooltip} onDismiss={dismissTooltip} />
 
     </div>
   );

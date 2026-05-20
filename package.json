@@ -8,20 +8,15 @@
     "build": "vite build",
     "preview": "vite preview",
     "process-data": "python3 scripts/process_data.py",
+    "generate-layout": "node scripts/generate_network_layout.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
     "cytoscape": "^3.33.3",
     "cytoscape-fcose": "^2.2.0",
-    "d3-format": "^3.1.0",
-    "d3-interpolate": "^3.0.1",
-    "d3-sankey": "^0.12.3",
-    "d3-scale": "^4.0.2",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "vis-data": "^8.0.4",
-    "vis-network": "^10.0.3"
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.0",

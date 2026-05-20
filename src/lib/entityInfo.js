@@ -1,5 +1,5 @@
-// Descriptions shown in hover tooltips for donors and parties.
-// Keep these short — they appear in a small tooltip panel.
+// Descriptions shown in the detail panel for donors and parties.
+// Keep these short — they appear in a compact panel below the chart.
 
 export const DONOR_INFO = {
   'Mineralogy Pty Ltd (Clive Palmer)':
