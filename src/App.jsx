@@ -60,7 +60,8 @@ export default function App() {
         <div className="chart-shell chart-shell--bleed">
           <div className="network-block">
             <NetworkGraph
-              data={currentData}
+              data={fundingData.combined}
+              filterData={selectedYears.length < fundingData.years.length ? currentData : null}
               onTooltip={handleTooltip}
               tooltipPinned={Boolean(tooltip?.pinned)}
               pinnedLegendCategory={tooltip?.legendCategory ?? null}

@@ -198,7 +198,7 @@ function buildCategoryTooltipBody(category, graphLinks, flowMap, nodeById, nameT
   );
 }
 
-export default function NetworkGraph({ data, onTooltip, tooltipPinned, pinnedLegendCategory }) {
+export default function NetworkGraph({ data, filterData, onTooltip, tooltipPinned, pinnedLegendCategory }) {
   const containerRef = useRef(null);
   const cyRef = useRef(null);
   const onTooltipRef = useRef(onTooltip);
@@ -211,6 +211,7 @@ export default function NetworkGraph({ data, onTooltip, tooltipPinned, pinnedLeg
     () => typeof window !== 'undefined' && window.innerWidth <= 640
   );
   const [hoverLegendCategory, setHoverLegendCategory] = useState(null);
+  const [saveStatus, setSaveStatus] = useState('idle'); // idle | saving | saved | error
   const hoverLegendCategoryRef = useRef(null);
 
   useEffect(() => { onTooltipRef.current = onTooltip; }, [onTooltip]);
@@ -234,6 +235,18 @@ export default function NetworkGraph({ data, onTooltip, tooltipPinned, pinnedLeg
   const {
     cyElements, graphLinks, flowMap, nodeById, hasNodes,
   } = graph;
+
+  // Names of nodes visible in the current year filter (null = show all)
+  const filteredGraph = useMemo(
+    () => filterData ? buildGraphFromFundingData(filterData) : null,
+    [filterData],
+  );
+  const activeNodeNames = useMemo(
+    () => filteredGraph
+      ? new Set([...filteredGraph.nodeById.values()].map(n => n.name))
+      : null,
+    [filteredGraph],
+  );
 
   const layoutElements = useMemo(
     () => cyElements.filter(el => el.group !== 'edges' || !el.data?.isSim),
@@ -399,6 +412,31 @@ export default function NetworkGraph({ data, onTooltip, tooltipPinned, pinnedLeg
     };
   }, [layoutElements, layoutNarrow, hasNodes, layoutName, layoutRootId, useBakedLayout, presetPositions, nodeById, viewSettings, editMode]);
 
+  // Show/hide nodes and edges when year filter changes — no Cytoscape rebuild
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+    cy.batch(() => {
+      cy.nodes().forEach(n => {
+        const raw = nodeById.get(parseInt(n.id(), 10));
+        if (!raw) return;
+        if (!activeNodeNames || activeNodeNames.has(raw.name)) {
+          n.show();
+        } else {
+          n.hide();
+        }
+      });
+      cy.edges().forEach(e => {
+        if (e.data('isSim')) return;
+        if (e.source().hidden() || e.target().hidden()) {
+          e.hide();
+        } else {
+          e.show();
+        }
+      });
+    });
+  }, [activeNodeNames, nodeById]);
+
   useEffect(() => {
     if (!tooltipPinned && !pinnedLegendCategory) {
       highlightApiRef.current.clear?.();
@@ -440,6 +478,28 @@ export default function NetworkGraph({ data, onTooltip, tooltipPinned, pinnedLeg
     });
   }, [pinnedLegendCategory]);
 
+  const handleSaveLayout = useCallback(async () => {
+    const cy = cyRef.current;
+    if (!cy) return;
+    const positions = {};
+    cy.nodes().forEach((n) => {
+      const raw = nodeById.get(parseInt(n.id(), 10));
+      if (raw) positions[raw.name] = { x: n.position('x'), y: n.position('y') };
+    });
+    setSaveStatus('saving');
+    try {
+      const res = await fetch('/__save-layout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(positions, null, 2),
+      });
+      setSaveStatus(res.ok ? 'saved' : 'error');
+    } catch {
+      setSaveStatus('error');
+    }
+    setTimeout(() => setSaveStatus('idle'), 2500);
+  }, [nodeById]);
+
   if (!hasNodes) {
     return <div className="chart-empty">No data for this selection.</div>;
   }
@@ -449,7 +509,15 @@ export default function NetworkGraph({ data, onTooltip, tooltipPinned, pinnedLeg
       <div className="network-container">
         {editMode && (
           <div className="network-mobile-bar" role="region" aria-label="Layout editor">
-            <span className="network-mobile-bar__hint">Drag nodes to adjust · then run npm run snapshot-layout</span>
+            <span className="network-mobile-bar__hint">Drag nodes to adjust layout</span>
+            <button
+              type="button"
+              className="network-mobile-bar__btn"
+              onClick={handleSaveLayout}
+              disabled={saveStatus === 'saving'}
+            >
+              {saveStatus === 'saving' ? 'Saving…' : saveStatus === 'saved' ? 'Saved ✓' : saveStatus === 'error' ? 'Error ✗' : 'Save layout'}
+            </button>
           </div>
         )}
         {layoutNarrow && !editMode && (

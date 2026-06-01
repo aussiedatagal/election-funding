@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "process-data": "python3 scripts/process_data.py",
     "generate-layout": "node scripts/generate_network_layout.mjs",
+    "process-draft": "node scripts/process_draft_layout.mjs",
     "snapshot-layout": "node scripts/snapshot_layout.mjs",
     "compare-cy-layouts": "node scripts/compare_cy_layouts.mjs",
     "compare-layouts": "node scripts/compare_layouts.mjs",
