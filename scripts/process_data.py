@@ -244,7 +244,12 @@ DONOR_KNOWN: dict[str, str] = {
     "pratt holdings pty limited": "Property & Development",
     "meriton property services": "Property & Development",
     "climate 200": "Climate & teal",
+    "climate 200 pty limited": "Climate & teal",
     "lb conservation pty ltd": "Climate & teal",
+    "lb conservation pty ltd atf lb conservation trust": "Climate & teal",
+    "regional voices fund pty ltd": "Climate & teal",
+    "vida impact fund pty ltd": "Climate & teal",
+    "keep them honest pty ltd": "Climate & teal",
     "duncan turpie": "Climate & teal",
     "oryxium investments limited": "Finance & Investment",
     "oryxium investments limited": "Finance & Investment",
@@ -396,6 +401,20 @@ DONOR_ALIASES: dict[str, str] = {
     "jefferson investments pty ltd": "Jefferson Investments",
     "jefferson investments": "Jefferson Investments",
     "the estate of alan kelvin harrison": "Estate of Alan Harrison",
+    # Election-data variants
+    "climate 200 pty limited": "Climate 200",
+    "climate 200 pty ltd": "Climate 200",
+    "climate 200": "Climate 200",
+    "lb conservation pty ltd atf lb conservation trust": "LB Conservation Pty Ltd",
+    "lb conservation pty ltd": "LB Conservation Pty Ltd",
+    "pater, norman": "Norman Pater",
+    "pater investments pty ltd": "Pater Investments",
+    "keldoulis investments pty limited": "Keldoulis Investments Pty Limited",
+    "keldoulis, robert": "Robert Keldoulis",
+    "regional voices fund pty ltd": "Regional Voices Fund",
+    "vida impact fund pty ltd": "VIDA Impact Fund",
+    "keep them honest pty ltd": "Keep Them Honest Pty Ltd",
+    "william taylor nominees pty ltd": "William Taylor Nominees Pty Ltd",
 }
 
 
@@ -411,6 +430,20 @@ def normalise_donor(name: str) -> str:
 RECENT_YEARS = {
     "2019-20", "2020-21", "2021-22", "2022-23", "2023-24", "2024-25",
 }
+
+ELECTION_DATA_DIR = DATA_DIR.parent / "election_data"
+
+# Maps AEC election event name → financial year bucket
+ELECTION_TO_YEAR = {
+    "2025 Federal Election": "2024-25",
+    "2022 Federal election": "2021-22",
+    "2019 Federal election": "2019-20",
+}
+
+# Party names that mean "not affiliated" in election returns — mapped to Teal
+# because in practice all meaningful federal independent campaign money
+# goes to community-independent / Climate-200-network candidates.
+_INDEPENDENT_LABELS = {"independent", "unendorsed", ""}
 
 # Normalise year string format
 def normalise_year(y: str) -> str:
@@ -446,6 +479,76 @@ def is_internal_transfer(donor: str, recipient_family: str) -> bool:
         return True
 
     return False
+
+
+def load_election_donations() -> tuple[dict, dict]:
+    """
+    Load candidate/senate-group election donations and roll them up to party families.
+
+    Returns the same (data, donor_categories) shape as the annual processing so
+    the two can be merged directly.  Election year → financial year via ELECTION_TO_YEAR.
+    Independent candidates are mapped to 'Climate Independents (Teal)' because
+    in practice all significant federal independent campaign money goes to the
+    community-independent / Climate-200 network.
+    """
+    summary_path = ELECTION_DATA_DIR / "Senate Groups and Candidate Return Summary.csv"
+    donations_path = ELECTION_DATA_DIR / "Senate Groups and Candidate Donations.csv"
+
+    if not donations_path.exists():
+        return {}, {}
+
+    # Build (event, candidate_name) → party_family from the return summary
+    cand_family: dict[tuple[str, str], str] = {}
+    if summary_path.exists():
+        with open(summary_path, encoding="utf-8-sig") as f:
+            for row in csv.DictReader(f):
+                event = row["Event"]
+                if event not in ELECTION_TO_YEAR:
+                    continue
+                raw_party = row["Party Name"].strip()
+                if raw_party.lower() in _INDEPENDENT_LABELS:
+                    family = "Climate Independents (Teal)"
+                else:
+                    family = normalise_party(raw_party)
+                cand_family[(event, row["Name"])] = family
+
+    data: dict[str, dict[tuple[str, str], float]] = defaultdict(lambda: defaultdict(float))
+    donor_categories: dict[str, str] = {}
+
+    with open(donations_path, encoding="utf-8-sig") as f:
+        for row in csv.DictReader(f):
+            event = row["Event"]
+            if event not in ELECTION_TO_YEAR:
+                continue
+
+            try:
+                value = float(row["Gift Value"])
+            except (ValueError, TypeError):
+                continue
+            if value <= 0:
+                continue
+
+            year = ELECTION_TO_YEAR[event]
+            raw_donor = row["Donor Name"].strip()
+            donor = normalise_donor(raw_donor)
+            party_family = cand_family.get((event, row["Name"]), "Other / Minor Parties")
+
+            # Skip party self-funding (party donating to its own candidates)
+            donor_as_party = normalise_party(raw_donor)
+            if (donor_as_party == party_family
+                    and donor_as_party not in ("Other / Minor Parties", "Climate Independents (Teal)")):
+                continue
+
+            # Skip electoral commission / government payments
+            dn_lower = re.sub(r'\s+', ' ', raw_donor.lower()).strip()
+            if "electoral commission" in dn_lower or "department of finance" in dn_lower:
+                continue
+
+            data[year][(donor, party_family)] += value
+            if donor not in donor_categories:
+                donor_categories[donor] = categorise_donor(raw_donor)
+
+    return data, donor_categories
 
 
 def load_receipts() -> list[dict]:
@@ -514,6 +617,15 @@ def process() -> dict:
         data[year][(donor, party_family)] += value
         if donor not in donor_categories:
             donor_categories[donor] = categorise_donor(raw_donor)
+
+    # Merge election campaign donations
+    elec_data, elec_cats = load_election_donations()
+    for year, year_data in elec_data.items():
+        for key, val in year_data.items():
+            data[year][key] += val
+    for donor, cat in elec_cats.items():
+        if donor not in donor_categories:
+            donor_categories[donor] = cat
 
     return data, donor_categories
 
@@ -896,17 +1008,20 @@ def main():
         "dataSource": "Australian Electoral Commission — Transparency Register",
         "dataUrl": "https://transparency.aec.gov.au/Download",
         "notes": (
-            "Only 'Donation Received' entries from Political Party Returns are shown. "
-            "'Other Receipt' items (bank transactions, commercial income, loans) are excluded "
-            "to avoid misrepresenting the donor landscape. "
-            "Public funding (AEC and state electoral commission payments), tax refunds, "
-            "and intra-party transfers between state and national branches are excluded. "
+            "Combines two AEC disclosure streams: (1) 'Donation Received' entries from "
+            "Political Party Annual Returns (financial years 2019-20 to 2024-25), and "
+            "(2) candidate and senate-group election donations from the 2019, 2022 and "
+            "2025 federal elections, mapped to the corresponding financial year. "
+            "'Other Receipt' items (bank transactions, commercial income, loans) are excluded. "
+            "Public funding, tax refunds, and intra-party transfers are excluded. "
+            "Independent candidates are grouped under 'Climate Independents (Teal)' as "
+            "virtually all significant independent campaign money in federal elections "
+            "flows to community-independent / Climate-200-network candidates. "
             "Donor names have been normalised where multiple spellings exist in the AEC data. "
-            "Data current to 2024-25 financial year (published February 2026). "
+            "Annual data current to 2024-25 (published February 2026). "
             "Donations announced after June 2025 — including Gina Rinehart's plane gift "
             "to One Nation (April 2026) and Hancock-executive donations of $500,000 each "
-            "to One Nation — are not yet in this dataset and will appear in the "
-            "2025-26 returns due February 2027."
+            "to One Nation — are not yet in this dataset."
         ),
     }
 

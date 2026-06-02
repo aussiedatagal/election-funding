@@ -20,15 +20,18 @@ function validate(positions, graph) {
   const nodeDataById = new Map(
     graph.cyElements.filter(el => el.group === 'nodes').map(el => [el.data.id, el.data])
   );
-  const bodies = [...graph.nodeById.entries()].map(([id, node]) => {
+  const bodies = [];
+  graph.nodeById.forEach((node, id) => {
     const p = positions[node.name];
+    if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return; // skip new/missing nodes
     const data = nodeDataById.get(String(id));
     if (node.type === 'party') {
       const { hw, hh } = partyHalfSize(data);
-      return { id, type: 'party', x: p.x, y: p.y, w: hw * 2, h: hh * 2 };
+      bodies.push({ id, type: 'party', x: p.x, y: p.y, w: hw * 2, h: hh * 2 });
+    } else {
+      const r = donorRadius(data);
+      bodies.push({ id, type: 'donor', x: p.x, y: p.y, r, w: r * 2, h: r * 2 });
     }
-    const r = donorRadius(data);
-    return { id, type: 'donor', x: p.x, y: p.y, r, w: r * 2, h: r * 2 };
   });
   return countLayoutOverlaps(bodies);
 }
@@ -40,23 +43,34 @@ let metrics;
 
 if (existsSync(CURATED_PATH)) {
   positions = JSON.parse(readFileSync(CURATED_PATH, 'utf8'));
+
+  // Validate only the nodes already in the curated file (ignore new nodes)
   const overlaps = validate(positions, graph);
   metrics = { overlaps, source: 'curated' };
   if (overlaps > 0) {
-    console.warn(`Curated layout has ${overlaps} overlaps — regenerating from build…`);
-    positions = null;
+    console.warn(`Curated layout has ${overlaps} overlaps — using it anyway (fix by dragging in ?edit=1)`);
+  }
+
+  // Place any nodes added since the curated file was saved at the origin —
+  // they'll appear in the centre and can be dragged into position via ?edit=1
+  if (positions) {
+    const newNodes = [];
+    graph.nodeById.forEach((node) => {
+      if (!positions[node.name]) {
+        positions[node.name] = { x: 0, y: 0 };
+        newNodes.push(node.name);
+      }
+    });
+    if (newNodes.length) {
+      console.log(`New nodes placed at origin (drag to position in ?edit=1):\n  ${newNodes.join('\n  ')}`);
+      metrics.newNodes = newNodes.length;
+    }
   }
 }
 
 if (!positions) {
-  const layout = buildManualLayout({
-    nodeById: graph.nodeById,
-    graphLinks: graph.graphLinks,
-    cyElements: graph.cyElements,
-  });
-  positions = layout.positions;
-  metrics = layout.metrics;
-  writeFileSync(CURATED_PATH, `${JSON.stringify(positions, null, 2)}\n`);
+  console.error('No valid curated layout found. Edit the layout via ?edit=1 and click Save Layout.');
+  process.exit(1);
 }
 
 const payload = {
