@@ -12,6 +12,7 @@
     "process-draft": "node scripts/process_draft_layout.mjs",
     "semantic-layout": "node scripts/generate_semantic_layout.mjs",
     "equal-layout": "node scripts/generate_equal_spacing_layout.mjs",
+    "weighted-layout": "node scripts/generate_weighted_layout.mjs",
     "snapshot-layout": "node scripts/snapshot_layout.mjs",
     "compare-cy-layouts": "node scripts/compare_cy_layouts.mjs",
     "compare-layouts": "node scripts/compare_layouts.mjs",
