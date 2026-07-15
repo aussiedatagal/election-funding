@@ -1,57 +1,79 @@
 /**
  * Weighted-distance layout: a donor's distance to each party it funds is
- * proportional to how *little* of its total giving went there — the party
- * that got the biggest share sits closest. E.g. a donor that split 40/60
- * between Party A and Party B ends up nearer Party B.
+ * approximately proportional to how *little* of its total giving went there
+ * — the party that got the biggest share sits closest. E.g. a donor that
+ * split 40/60 between Party A and Party B ends up nearer Party B. The ratio
+ * is a soft target, not exact — crossing reduction is allowed to flex it.
  *
  * Per donor→party link with value v, and donor total T = Σv:
- *   frac        = v / T                          (0, 1]
- *   idealLength = LEN_MIN + (LEN_MAX - LEN_MIN) * (1 - frac)
- * frac = 1   (single-party donor)      → LEN_MIN (closest)
- * frac = 0.5 (even split of 2 parties) → midpoint, same as the old constant
- *             REST_LENGTH used by the equal-spacing layout
- * frac → 0   (small share of a big donor's total) → LEN_MAX (farthest)
+ *   frac        = v / T                                            (0, 1]
+ *   minGap      = partyHalfDiagonal + donorRadius + GAP_BUFFER
+ *   idealLength = minGap + LEN_SPREAD * (1 - frac)
+ * frac = 1   (single-party donor)      → minGap (closest, but always a real
+ *             visible gap from the party's edge — never flush against it,
+ *             scaled to that specific party/donor's actual shape size)
+ * frac = 0.5 (even split of 2 parties) → minGap + half of LEN_SPREAD
+ * frac → 0   (small share of a big donor's total) → minGap + LEN_SPREAD (farthest)
  *
- * This ideal length replaces the constant REST_LENGTH spring target from
- * generate_equal_spacing_layout.mjs; every other force is unchanged and
- * still fights for zero crossings:
+ * Forces (unchanged in kind from generate_equal_spacing_layout.mjs, just
+ * rebalanced so the crossing-penalty force can win local arguments against
+ * the spring rather than holding donors to an exact ratio):
  *   1. Tangential angular force: purely perpendicular to each edge, corrects
- *      the angle without changing the edge length (so it doesn't fight the
- *      per-edge distance targets above).
- *   2. Weighted edge spring: pulls each edge toward its own idealLength
- *      rather than one shared rest length.
+ *      the angle without changing the edge length (never fights the
+ *      per-edge distance target above).
+ *   2. Weighted edge spring: pulls each edge toward its own idealLength —
+ *      loosened (lower K_SPRING) relative to the old equal-spacing script
+ *      so it's a soft preference, not a hard constraint.
  *   3. Crossing-penalty force: signed-area gradient of the quadrilateral
- *      formed by any two crossing edges. Normalised so magnitude = K_CROSS
- *      per crossing.
+ *      formed by any two crossing edges — strengthened (higher K_CROSS) so
+ *      it can pull a donor off its exact ratio distance when that resolves
+ *      a crossing.
  *   4. Repulsion between all pairs.
  *   5. Centering gravity.
  *
+ * After the simulation settles and node-overlaps are resolved, a bounded
+ * local greedy pass nudges multi-party ("core") donors within a limited
+ * radius of their settled position — never a global search — to mop up any
+ * remaining crossings, rejecting any move that would create a node overlap.
+ * This is the "flex it a bit to reduce edge crossover" step: donors stay
+ * close to their donation-share target but aren't pinned to it exactly.
+ *
+ * Seeds from src/data/network-layout-draft.json (the latest browser-saved
+ * layout) when present, else from network-layout.json.
+ *
  * Run: npm run weighted-layout
  */
-import { writeFileSync, readFileSync } from 'fs';
+import { writeFileSync, readFileSync, existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import fundingData from '../src/data/funding.json' with { type: 'json' };
 import { buildGraphFromFundingData, centerLayoutPositions } from '../src/lib/networkGraphBuild.js';
 import {
-  countLayoutOverlaps, donorRadius, partyHalfSize,
-  resolveBodyOverlaps,
+  countLayoutOverlaps, donorRadius, partyHalfSize, partyHalfDiagonal,
+  resolveBodyOverlaps, separateCircleCircle, separateCircleRect,
 } from '../src/lib/networkGraphLayoutUtils.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LAYOUT_PATH  = join(__dirname, '../src/data/network-layout.json');
 const CURATED_PATH = join(__dirname, '../src/data/network-layout-curated.json');
+const DRAFT_PATH   = join(__dirname, '../src/data/network-layout-draft.json');
 
 // ── parameters ────────────────────────────────────────────────────────────────
-const LEN_MIN   = 90;      // px — ideal length for a donor's largest-share party
-const LEN_MAX   = 310;     // px — ideal length for a donor's smallest-share party
+const GAP_BUFFER = 34;     // px — minimum visible clearance beyond the shapes at frac=1
+const LEN_SPREAD = 200;    // px — extra distance added on top of minGap as share shrinks toward 0
 const K_ANGLE   = 0.04;    // tangential angular force (perpendicular to edge)
-const K_SPRING  = 0.012;   // radial spring force toward each edge's idealLength
-const K_CROSS   = 0.10;    // crossing-penalty force (normalised per crossing)
+const K_SPRING  = 0.007;   // radial spring force toward each edge's idealLength (soft — see K_CROSS)
+const K_CROSS   = 0.14;    // crossing-penalty force (normalised per crossing) — wins local fights vs spring
 const K_REPULSE = 12000;   // repulsion constant between all pairs
 const K_CENTER  = 0.003;   // gravity toward origin
 const DAMPING   = 0.82;    // velocity damping per step
 const N_ITER    = 4000;    // more iterations — crossing force needs time
+const REFINE_PASSES = 6;   // local greedy crossing clean-up passes after the sim settles
+const REFINE_RADII  = [40, 80, 130, 190]; // px — candidate offsets tried per donor, per pass
+const REFINE_ANGLES = 16;  // candidate directions per radius
+const NODE_CLEARANCE = 20; // px — added to every donor's radius for overlap-resolution/refinement
+                            // purposes only, so donors never end up flush against a party's edge
+                            // (or another donor) — real render radius is untouched.
 
 // ── graph ─────────────────────────────────────────────────────────────────────
 const graph = buildGraphFromFundingData(fundingData.combined);
@@ -71,10 +93,16 @@ for (const link of graphLinks) {
 const idealLength = new Map(); // link → px
 for (const link of graphLinks) {
   const src = nodeById.get(link.source), tgt = nodeById.get(link.target);
-  if (!src || !tgt || src.type !== 'donor' || tgt.type !== 'party') { idealLength.set(link, LEN_MIN); continue; }
+  const partyData = nodeDataById.get(String(link.target));
+  const donorData = nodeDataById.get(String(link.source));
+  if (!src || !tgt || src.type !== 'donor' || tgt.type !== 'party' || !partyData || !donorData) {
+    idealLength.set(link, 200);
+    continue;
+  }
   const total = donorTotals.get(link.source) || link.value;
   const frac = total > 0 ? link.value / total : 1;
-  idealLength.set(link, LEN_MIN + (LEN_MAX - LEN_MIN) * (1 - frac));
+  const minGap = partyHalfDiagonal(partyData) + donorRadius(donorData) + GAP_BUFFER;
+  idealLength.set(link, minGap + LEN_SPREAD * (1 - frac));
 }
 
 console.log('Donation-share examples (multi-party donors):');
@@ -105,7 +133,13 @@ for (const link of graphLinks) {
 
 // ── load initial positions ────────────────────────────────────────────────────
 const existingLayout = JSON.parse(readFileSync(LAYOUT_PATH, 'utf8'));
-const initPos = existingLayout.positions; // name → {x, y}
+let initPos = existingLayout.positions; // name → {x, y}
+if (existsSync(DRAFT_PATH)) {
+  initPos = JSON.parse(readFileSync(DRAFT_PATH, 'utf8'));
+  console.log('Seeding from latest saved draft (network-layout-draft.json)');
+} else {
+  console.log('Seeding from network-layout.json (no draft found)');
+}
 
 // ── initialise state ──────────────────────────────────────────────────────────
 const pos = new Map(); // id → {x, y}
@@ -162,7 +196,8 @@ for (let iter = 0; iter < N_ITER; iter++) {
   nodes.forEach(n => forces.set(n.id, { fx: 0, fy: 0 }));
 
   // 1a. Weighted edge spring — pulls each edge toward its own idealLength
-  //     (donation-share proportional), not one shared rest length.
+  //     (donation-share proportional), not one shared rest length. Loosened
+  //     (K_SPRING) so the crossing-penalty force can override it locally.
   for (const link of graphLinks) {
     const pa = pos.get(link.source), pb = pos.get(link.target);
     if (!pa || !pb) continue;
@@ -304,7 +339,7 @@ function makeBodies(posMap) {
       const { hw, hh } = partyHalfSize(data);
       bodies.push({ id, name: node.name, type: 'party', x: p.x, y: p.y, hw, hh, w: hw * 2, h: hh * 2 });
     } else {
-      const r = donorRadius(data);
+      const r = donorRadius(data) + NODE_CLEARANCE;
       bodies.push({ id, name: node.name, type: 'donor', x: p.x, y: p.y, r, hw: r, hh: r, w: r * 2, h: r * 2 });
     }
   });
@@ -324,10 +359,85 @@ for (let i = 0; i < 200; i++) {
   resolveBodyOverlaps(bodies, 4);
   if (countLayoutOverlaps(bodies) === 0) break;
 }
-
-const finalOverlaps = countLayoutOverlaps(bodies);
-console.log(`Node overlaps: ${finalOverlaps}`);
 for (const b of bodies) allPos[b.name] = { x: b.x, y: b.y };
+console.log(`Node overlaps after resolution: ${countLayoutOverlaps(bodies)}`);
+
+// ── local greedy crossing refinement (bounded "flex") ─────────────────────────
+// Nudges core (multi-party) donors within a limited radius of their settled
+// position to mop up crossings the force sim didn't fully resolve. Parties
+// and single-party donors stay fixed; a move is only accepted if it (a)
+// introduces zero node overlaps and (b) strictly reduces that donor's
+// crossing count. This deliberately does NOT search the whole canvas — it
+// stays local, so positions keep tracking their donation-share target
+// approximately while still chasing fewer crossings.
+function buildDonorPartySegs(posMap) {
+  const segs = [];
+  for (const link of graphLinks) {
+    const src = nodeById.get(link.source), tgt = nodeById.get(link.target);
+    if (!src || !tgt || src.type !== 'donor' || tgt.type !== 'party') continue;
+    const p1 = posMap[src.name], p2 = posMap[tgt.name];
+    if (!p1 || !p2) continue;
+    segs.push({ x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, d: src.name, p: tgt.name });
+  }
+  return segs;
+}
+
+function crossingsInvolving(dname, allSegs) {
+  let n = 0;
+  for (const ds of allSegs) {
+    if (ds.d !== dname) continue;
+    for (const other of allSegs) {
+      if (other.d === dname || ds.p === other.p) continue;
+      if (segmentsCross(ds.x1, ds.y1, ds.x2, ds.y2, other.x1, other.y1, other.x2, other.y2)) n++;
+    }
+  }
+  return n;
+}
+
+function overlapsAnyBody(name, x, y, r, bodyByName) {
+  // r already includes NODE_CLEARANCE (candidates come from body.r, built by
+  // makeBodies), so this naturally keeps the same minimum gap as the main
+  // overlap-resolution pass — no flush placements against a party's edge.
+  for (const [otherName, b] of bodyByName) {
+    if (otherName === name) continue;
+    const hit = b.type === 'party'
+      ? separateCircleRect(x, y, r, b.x, b.y, b.w, b.h)
+      : separateCircleCircle(x, y, r, b.x, b.y, b.r);
+    if (hit) return true;
+  }
+  return false;
+}
+
+const bodyByName = new Map(bodies.map(b => [b.name, b]));
+const coreDonorNames = multiDonorIds.map(id => nodeById.get(id)?.name).filter(Boolean);
+
+console.log(`\nLocal greedy refinement over ${coreDonorNames.length} multi-party donors...`);
+for (let pass = 0; pass < REFINE_PASSES; pass++) {
+  let improved = false;
+  for (const dname of coreDonorNames) {
+    const body = bodyByName.get(dname);
+    if (!body) continue;
+    let best = crossingsInvolving(dname, buildDonorPartySegs(allPos));
+    if (best === 0) continue;
+    const ox = allPos[dname].x, oy = allPos[dname].y;
+    let bestX = ox, bestY = oy;
+    for (const radius of REFINE_RADII) {
+      for (let a = 0; a < REFINE_ANGLES; a++) {
+        const theta = (2 * Math.PI * a) / REFINE_ANGLES;
+        const cx = ox + radius * Math.cos(theta);
+        const cy = oy + radius * Math.sin(theta);
+        if (overlapsAnyBody(dname, cx, cy, body.r, bodyByName)) continue;
+        allPos[dname] = { x: cx, y: cy };
+        const c = crossingsInvolving(dname, buildDonorPartySegs(allPos));
+        if (c < best) { best = c; bestX = cx; bestY = cy; improved = true; }
+      }
+    }
+    allPos[dname] = { x: bestX, y: bestY };
+    body.x = bestX; body.y = bestY;
+  }
+  if (!improved) break;
+}
+console.log(`Node overlaps after refinement: ${countLayoutOverlaps(bodies)}`);
 
 // ── write output ──────────────────────────────────────────────────────────────
 const positions = centerLayoutPositions(allPos);
@@ -351,11 +461,12 @@ for (let i = 0; i < finalSegs.length; i++) {
 }
 console.log(`\nEdge crossings: ${crossings}`);
 
+const finalOverlaps = countLayoutOverlaps(makeBodies(positions));
 writeFileSync(CURATED_PATH, `${JSON.stringify(positions, null, 2)}\n`);
 
 const payload = {
   ...existingLayout,
-  description: 'Weighted-distance layout — donor↔party distance proportional to donation share, with crossing minimisation',
+  description: 'Weighted-distance layout — donor↔party distance approx. proportional to donation share, with crossing minimisation',
   positions,
   nodeNames: graph.nodeNames,
   metrics: { source: 'weighted_proportional', overlaps: finalOverlaps, crossings },
