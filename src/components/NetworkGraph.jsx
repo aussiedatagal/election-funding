@@ -77,8 +77,8 @@ function buildNodeTooltipBody(node, flowMap, linksArr, nodeById, nameToId, onPic
       <div className="tt-name">{node.name}</div>
       <div className="tt-meta">
         {isParty ? '■ Party / Group' : isGroup
-          ? `● Grouped donors — ${node.category}`
-          : `● Donor — ${node.category}`}
+          ? `● Grouped donors: ${node.category}`
+          : `● Donor: ${node.category}`}
       </div>
       <div className="tt-amount tt-amount--hero">
         <span className="tt-amount-label">{isParty ? 'Total received' : 'Total donated'}</span>

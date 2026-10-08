@@ -5,11 +5,11 @@ export const PARTY_COLORS = {
 
   // Greens / Progressives
   'Australian Greens':               '#009B3A',
-  'Climate Independents (Teal)':     '#00838F',
   'Sustainable Australia':           '#66BB6A',
   'Reason Australia':                '#AB47BC',
 
   // Centre / Crossbench
+  'Independents':                    '#00838F',
   'Centre Alliance':                 '#546E7A',
   'Jacqui Lambie Network':           '#7B5EA7',
   'Rex Patrick Team':                '#78909C',
@@ -46,7 +46,7 @@ export const CATEGORY_COLORS = {
   'Mining & Resources':              '#E65100',  // orange
   'Unions':                          '#D32F2F',  // red
   'Property & Development':          '#1976D2',  // blue
-  'Climate & teal':                  '#00BCD4',  // cyan
+  'Crossbench funds':                '#00BCD4',  // cyan
   'Finance & Investment':            '#7B1FA2',  // purple
   'Party fundraising':               '#9E9E9E',  // neutral grey
   'Individual Donor':                '#FFB300',  // gold
@@ -57,7 +57,7 @@ export const PARTY_ORDER = [
   'Australian Labor Party',
   'Victorian Socialists',
   'Australian Greens',
-  'Climate Independents (Teal)',
+  'Independents',
   'Reason Australia',
   'Centre Alliance',
   'Sustainable Australia',

@@ -14,7 +14,6 @@
     "elapsedSeconds": 400
   },
   "nodeNames": [
-    "ALP National Secretariat",
     "Adani / Bravus Mining",
     "Adani Mining Pty Ltd",
     "Alan Hastings Magnusson",
@@ -27,7 +26,7 @@
     "Australian Citizens Party",
     "Australian Greens",
     "Australian Labor Party",
-    "Australian Manufacturing Workers  Union",
+    "Australian Manufacturing Workers Union",
     "Australian Romance",
     "Australian Values Party",
     "Bill Nitchke",
@@ -38,7 +37,6 @@
     "Chiu Ling Ngooi",
     "Christian Democratic Party",
     "Climate 200",
-    "Climate Independents (Teal)",
     "Clive Frederick Palmer",
     "Clive Palmer / UAP",
     "Colleen Reid",
@@ -47,6 +45,7 @@
     "Duncan Turpie",
     "Electrical Trades Union",
     "Electrical Trades Union (ETU)",
+    "Estate of Alan Harrison",
     "Estate of David Walsh",
     "Estate of Late Denis Ashton, Etheringtons Solicitors",
     "Family First",
@@ -64,17 +63,18 @@
     "Holypeak Pty Ltd",
     "Ian & Pamela Wall",
     "Ian Melrose",
+    "Independents",
     "International Community Fellowship Inc",
     "JB Turner Mudguards",
     "Jacqui Lambie Network",
     "Jefferson Investments",
+    "John McEwen House Pty Ltd",
     "John Small",
     "Katter's Australian Party",
     "Keep Them Honest Pty Ltd",
     "Keldoulis Investments Pty Limited",
     "Kooyong 200 Club",
     "LB Conservation Pty Ltd",
-    "Labor Services &amp;  Holding Pty Ltd ATF the Labor Services and Holding Trust",
     "Legalise Cannabis Australia",
     "Liberal-National Coalition",
     "Libertarian / Liberal Democrats",
@@ -137,25 +137,17 @@
       "x": 74.86819725054116,
       "y": -504.1012217318671
     },
-    "ALP National Secretariat": {
-      "x": 66.31695012092288,
-      "y": 132.13061657837096
-    },
     "Shop Distributive & Allied Employees Union": {
       "x": 103.81816352087593,
       "y": 33.35328226894856
     },
-    "Australian Manufacturing Workers  Union": {
+    "Australian Manufacturing Workers Union": {
       "x": -6.122464908284755,
       "y": -593.098614270337
     },
     "Local Govt Engineers Union NSW": {
       "x": 113.11881089693415,
       "y": -65.55793842794014
-    },
-    "Labor Services &amp;  Holding Pty Ltd ATF the Labor Services and Holding Trust": {
-      "x": 113.10917189021602,
-      "y": -379.8954183725333
     },
     "Electrical Trades Union (ETU)": {
       "x": 115.49592760419354,
@@ -505,7 +497,7 @@
       "x": -984.0354556995848,
       "y": -256.7102448748711
     },
-    "Climate Independents (Teal)": {
+    "Independents": {
       "x": -1400.099492283745,
       "y": 143.5748189201787
     },
@@ -580,6 +572,14 @@
     "Liberal-National Coalition": {
       "x": 505.89090690139034,
       "y": -194.2842806055071
+    },
+    "Estate of Alan Harrison": {
+      "x": -467.3970137283998,
+      "y": -171.0750199987618
+    },
+    "John McEwen House Pty Ltd": {
+      "x": 330.7084012116834,
+      "y": -444.4708269223515
     }
   }
 }

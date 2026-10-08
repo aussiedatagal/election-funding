@@ -139,7 +139,7 @@ function layoutMinors(minors, pos, nodeDataById, cfg) {
 
 function layoutParties(communities, nodeById, nodeDataById, cfg) {
   const coalitionId = [...nodeById.entries()].find(([, n]) => n.name === COALITION)?.[0];
-  const laborBloc = findCommunity(communities, nodeById, name => /Labor|Green|Teal|Centre Alliance|Reason|Rex Patrick|Jacqui Lambie|Sustainable Australia/i.test(name));
+  const laborBloc = findCommunity(communities, nodeById, name => /Labor|Green|^Independents$|Centre Alliance|Reason|Rex Patrick|Jacqui Lambie|Sustainable Australia/i.test(name));
   const populistBloc = findCommunity(communities, nodeById, name => /Palmer|One Nation|Libertarian/i.test(name));
 
   const placed = new Set();

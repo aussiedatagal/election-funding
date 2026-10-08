@@ -8,7 +8,7 @@ export const MANUAL_PARTY_POSITIONS = {
   'Clive Palmer / UAP': { x: 620, y: -220 },
 
   // Labor-aligned cluster (left, more vertical spread)
-  'Climate Independents (Teal)': { x: -320, y: -80 },
+  'Independents': { x: -320, y: -80 },
   'Jacqui Lambie Network': { x: -640, y: 40 },
   'Sustainable Australia': { x: -200, y: 100 },
   'Australian Greens': { x: -480, y: 200 },

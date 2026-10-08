@@ -97,7 +97,7 @@ export default function App() {
             </p>
             <p>
               Only declared political donations above the annual disclosure threshold are
-              shown (about $16,300 in 2024–25; the threshold changes each year). Smaller
+              shown (about $16,300 in 2024–25, and the threshold changes each year). Smaller
               gifts are not reported individually. Public funding, loans, and other
               non-donation receipts are excluded.
             </p>

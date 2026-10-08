@@ -7,6 +7,7 @@ File: Detailed Receipts.csv
 """
 
 import csv
+import html
 import json
 import re
 from collections import defaultdict
@@ -81,7 +82,7 @@ PARTY_FAMILIES = {
         "One Nation Victoria",
         "One Nation Western Australia",
     ],
-    "Climate Independents (Teal)": [
+    "Independents": [
         "David Pocock",
         "Local Network",
         "Kim for Canberra",
@@ -189,9 +190,9 @@ DONOR_CATEGORY_KEYWORDS: list[tuple[str, list[str]]] = [
         "meriton", "pratt", "property", "construction", "real estate",
         "developer", "building", "realty",
     ]),
-    ("Climate & teal", [
-        "climate 200", "getup", "environment", "conservation",
-        "turpie", "lb conservation", "progressive business",
+    ("Crossbench funds", [
+        "climate 200", "regional voices fund", "vida impact fund",
+        "keep them honest",
     ]),
     ("Finance & Investment", [
         "pty ltd", "investments", "capital", "holdings", "finance",
@@ -234,7 +235,7 @@ DONOR_KNOWN: dict[str, str] = {
     "cormack foundation": "Party fundraising",
     "kooyong 200 club": "Party fundraising",
     "labor services & holdings pty ltd atf labor services & holdings trust": "Party fundraising",
-    "labor services &  holding pty ltd atf the labor services and holding trust": "Party fundraising",
+    "labor services & holding pty ltd atf the labor services and holding trust": "Party fundraising",
     "labor legacies pty ltd": "Party fundraising",
     "the australian labor party national secretariat": "Party fundraising",
     "sa porgressive business": "Party fundraising",
@@ -243,14 +244,14 @@ DONOR_KNOWN: dict[str, str] = {
     "pratt holdings pty ltd": "Property & Development",
     "pratt holdings pty limited": "Property & Development",
     "meriton property services": "Property & Development",
-    "climate 200": "Climate & teal",
-    "climate 200 pty limited": "Climate & teal",
-    "lb conservation pty ltd": "Climate & teal",
-    "lb conservation pty ltd atf lb conservation trust": "Climate & teal",
-    "regional voices fund pty ltd": "Climate & teal",
-    "vida impact fund pty ltd": "Climate & teal",
-    "keep them honest pty ltd": "Climate & teal",
-    "duncan turpie": "Climate & teal",
+    "climate 200": "Crossbench funds",
+    "climate 200 pty limited": "Crossbench funds",
+    "lb conservation pty ltd": "Other companies",
+    "lb conservation pty ltd atf lb conservation trust": "Other companies",
+    "regional voices fund pty ltd": "Crossbench funds",
+    "vida impact fund pty ltd": "Crossbench funds",
+    "keep them honest pty ltd": "Crossbench funds",
+    "duncan turpie": "Individual Donor",
     "oryxium investments limited": "Finance & Investment",
     "oryxium investments limited": "Finance & Investment",
     "stonehill nominees": "Finance & Investment",
@@ -294,9 +295,10 @@ INTERNAL_TRANSFER_DONORS = {
     "australian greens",  # national donating to state branches
     "liberal national party of queensland",  # lnp sending to federal liberal/national
     "the australian labor party national secretariat",
+    "alp national secretariat",
     "labor holdings pty ltd",
     "labor services & holdings pty ltd atf labor services & holdings trust",
-    "labor services &  holding pty ltd atf the labor services and holding trust",
+    "labor services & holding pty ltd atf the labor services and holding trust",
     "labor legacies pty ltd",
     "pauline hanson's one nation - victoria",
     "pauline hanson's one nation victoria",
@@ -348,8 +350,10 @@ DONOR_ALIASES: dict[str, str] = {
     "cormack foundation": "Cormack Foundation",
     "shop, distributive & allied employees' association": "Shop Distributive & Allied Employees Union",
     "shop distributive & allied employees association nat branch": "Shop Distributive & Allied Employees Union",
+    "shop distributive & allied employees association": "Shop Distributive & Allied Employees Union",
+    "sda": "Shop Distributive & Allied Employees Union",
     "labor services & holdings pty ltd atf labor services & holdings trust": "Labor Services & Holdings",
-    "labor services &  holding pty ltd atf the labor services and holding trust": "Labor Services & Holdings",
+    "labor services & holding pty ltd atf the labor services and holding trust": "Labor Services & Holdings",
     "oryxium investments limited": "Oryxium Investments",
     "oryxium investments limited": "Oryxium Investments",
     "sa porgressive business": "SA Progressive Business",
@@ -394,7 +398,7 @@ DONOR_ALIASES: dict[str, str] = {
     "health services union nsw": "Health Services Union (NSW)",
     "hsu - health services union- nsw": "Health Services Union (NSW)",
     "nsw local government clerical administrative energy airlines & utilities union": "Local Govt Engineers Union NSW",
-    "labor services &  holding pty ltd atf the labor services and holding trust": "Labor Services & Holdings",
+    "labor services & holding pty ltd atf the labor services and holding trust": "Labor Services & Holdings",
     "kooyong 200 club": "Kooyong 200 Club",
     "sa porgressive business": "SA Progressive Business",
     "meriton property services": "Meriton Property Services",
@@ -418,11 +422,14 @@ DONOR_ALIASES: dict[str, str] = {
 }
 
 
+def clean_name(name: str) -> str:
+    # Some AEC names contain HTML entities (&amp;) and doubled spaces
+    return re.sub(r'\s+', ' ', html.unescape(name)).strip()
+
+
 def normalise_donor(name: str) -> str:
-    low = name.strip().lower()
-    # Remove trailing whitespace artifacts (data quality issue)
-    low = re.sub(r'\s+', ' ', low).strip()
-    return DONOR_ALIASES.get(low, name.strip())
+    cleaned = clean_name(name)
+    return DONOR_ALIASES.get(cleaned.lower(), cleaned)
 
 
 # --- Main processing --------------------------------------------------
@@ -440,9 +447,9 @@ ELECTION_TO_YEAR = {
     "2019 Federal election": "2019-20",
 }
 
-# Party names that mean "not affiliated" in election returns — mapped to Teal
-# because in practice all meaningful federal independent campaign money
-# goes to community-independent / Climate-200-network candidates.
+# Party names that mean "not affiliated" in election returns. These candidates
+# are grouped as Independents. Most of the money goes to Climate 200-backed
+# candidates, but not all (e.g. Dai Le, Andrew Gee), so no teal label.
 _INDEPENDENT_LABELS = {"independent", "unendorsed", ""}
 
 # Normalise year string format
@@ -458,7 +465,7 @@ def normalise_year(y: str) -> str:
 
 
 def is_internal_transfer(donor: str, recipient_family: str) -> bool:
-    low = re.sub(r'\s+', ' ', donor.strip().lower())
+    low = clean_name(donor).lower()
 
     if low in INTERNAL_TRANSFER_DONORS:
         return True
@@ -487,9 +494,7 @@ def load_election_donations() -> tuple[dict, dict]:
 
     Returns the same (data, donor_categories) shape as the annual processing so
     the two can be merged directly.  Election year → financial year via ELECTION_TO_YEAR.
-    Independent candidates are mapped to 'Climate Independents (Teal)' because
-    in practice all significant federal independent campaign money goes to the
-    community-independent / Climate-200 network.
+    Candidates without a registered party are grouped as 'Independents'.
     """
     summary_path = ELECTION_DATA_DIR / "Senate Groups and Candidate Return Summary.csv"
     donations_path = ELECTION_DATA_DIR / "Senate Groups and Candidate Donations.csv"
@@ -507,7 +512,7 @@ def load_election_donations() -> tuple[dict, dict]:
                     continue
                 raw_party = row["Party Name"].strip()
                 if raw_party.lower() in _INDEPENDENT_LABELS:
-                    family = "Climate Independents (Teal)"
+                    family = "Independents"
                 else:
                     family = normalise_party(raw_party)
                 cand_family[(event, row["Name"])] = family
@@ -536,7 +541,7 @@ def load_election_donations() -> tuple[dict, dict]:
             # Skip party self-funding (party donating to its own candidates)
             donor_as_party = normalise_party(raw_donor)
             if (donor_as_party == party_family
-                    and donor_as_party not in ("Other / Minor Parties", "Climate Independents (Teal)")):
+                    and donor_as_party not in ("Other / Minor Parties", "Independents")):
                 continue
 
             # Skip electoral commission / government payments
@@ -635,7 +640,7 @@ PARTY_ORDER_LIST = [
     "Australian Labor Party",           # 0
     "Victorian Socialists",             # 1
     "Australian Greens",                # 2
-    "Climate Independents (Teal)",      # 3
+    "Independents",      # 3
     "Reason Australia",                 # 4
     "Centre Alliance",                  # 5
     "Sustainable Australia",            # 6
@@ -803,7 +808,7 @@ def build_sankey(year_data: dict[tuple[str, str], float],
     Build nodes + links for a single year (or combined) dataset.
 
     The top `top_n` donors by total value get their own named node.
-    Everything else is bucketed into "Other — <Category>" group nodes that
+    Everything else is bucketed into "Other (<Category>)" group nodes that
     carry a `members` list so the UI can display all donors within on hover.
     """
     # --- Aggregate donor totals and per-party breakdown ---
@@ -850,7 +855,7 @@ def build_sankey(year_data: dict[tuple[str, str], float],
             source = donor
         else:
             cat = donor_categories.get(donor, "Other companies")
-            source = f"Other — {cat}"
+            source = f"Other ({cat})"
             group_members_by_party[source][donor][party_family] += val
 
         # Party side
@@ -909,7 +914,7 @@ def build_sankey(year_data: dict[tuple[str, str], float],
         )
 
     def source_sort_key(s: str) -> float:
-        return group_sort_key(s) if s.startswith("Other — ") else donor_pos.get(s, 12.0)
+        return group_sort_key(s) if s.startswith("Other (") else donor_pos.get(s, 12.0)
 
     # --- Order targets and sources by data-driven positions ---
     targets = sorted(
@@ -936,8 +941,8 @@ def build_sankey(year_data: dict[tuple[str, str], float],
                 "primaryParty": name,
                 "sortKey": party_pos.get(name, 12.0),
             }
-        elif name.startswith("Other — "):
-            cat = name.replace("Other — ", "")
+        elif name.startswith("Other ("):
+            cat = name[len("Other ("):-1]
             primary = _primary_party(source_party_totals[name])
             node_obj = {
                 "id": node_index[name],
@@ -1005,7 +1010,7 @@ def main():
         "byYear": by_year,
         "combined": combined,
         "donorCategories": donor_categories,
-        "dataSource": "Australian Electoral Commission — Transparency Register",
+        "dataSource": "Australian Electoral Commission Transparency Register",
         "dataUrl": "https://transparency.aec.gov.au/Download",
         "notes": (
             "Combines two AEC disclosure streams: (1) 'Donation Received' entries from "
@@ -1014,14 +1019,10 @@ def main():
             "2025 federal elections, mapped to the corresponding financial year. "
             "'Other Receipt' items (bank transactions, commercial income, loans) are excluded. "
             "Public funding, tax refunds, and intra-party transfers are excluded. "
-            "Independent candidates are grouped under 'Climate Independents (Teal)' as "
-            "virtually all significant independent campaign money in federal elections "
-            "flows to community-independent / Climate-200-network candidates. "
+            "Candidates without a registered party are grouped as 'Independents'. "
             "Donor names have been normalised where multiple spellings exist in the AEC data. "
             "Annual data current to 2024-25 (published February 2026). "
-            "Donations announced after June 2025 — including Gina Rinehart's plane gift "
-            "to One Nation (April 2026) and Hancock-executive donations of $500,000 each "
-            "to One Nation — are not yet in this dataset."
+            "Donations made after June 2025 are not yet in this dataset."
         ),
     }
 
